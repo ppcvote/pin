@@ -6,10 +6,12 @@ export interface InlineButton {
   callback_data: string
 }
 
-/** Top-level menu — one row per skill. */
+/** Top-level menu — one row per skill, plus the agent card entry up top. */
 export function rootMenu(): { title: string; buttons: InlineButton[][] } {
   const skills = allSkills()
   const buttons: InlineButton[][] = []
+  // System-injected: agent card
+  buttons.push([{ text: '🃏 看我的 Agent', callback_data: 'card' }])
   for (const s of skills) {
     const icon = s.pin?.icon ?? '•'
     const label = `${icon} ${s.name}`

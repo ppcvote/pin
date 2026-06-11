@@ -6,6 +6,8 @@ import { rootMenu, skillMenu, parseCallback } from '../platform/menuRenderer.js'
 import { executeAction } from '../platform/actionExecutor.js'
 import { startWizard, processWizardCallback, processWizardText, type WizardOutcome } from '../platform/wizard.js'
 import { createBindingToken } from '../platform/binding.js'
+import { buildAgentCardData, renderAgentCardText } from '../platform/agentCard.js'
+import { incrementStat } from '../runtime/stats.js'
 import type { InboundMessage, OutboundReply, Button, ThemeHint } from '../channels/types.js'
 
 const NAV_ROW = (skillId?: string): Button[] => skillId
@@ -129,6 +131,20 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       return { text: view.title, buttons: view.buttons, edit: true, theme }
     }
 
+    // System-injected: agent card
+    if (data === 'card') {
+      const cardData = await buildAgentCardData(userKey)
+      const text = renderAgentCardText(cardData)
+      return {
+        text,
+        buttons: [[
+          { text: '⬅️ 主選單', callback_data: 'm:root' },
+        ]],
+        theme: { title: 'Pin' },
+        edit: true,
+      }
+    }
+
     // System-injected: binding code
     if (data.startsWith('bind:')) {
       const skillId = data.slice(5)
@@ -193,6 +209,8 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       }
 
       const result = await executeAction(skill, action, parsed.args)
+      // Count button-driven actions only (wizard ones get counted when finalized)
+      void incrementStat(userKey, 'actions')
       const text = result.ok
         ? (result.rendered ?? JSON.stringify(result.raw).slice(0, 1000))
         : `${action.label} 失敗 😢\n${result.error}`
@@ -238,6 +256,14 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     const { title, buttons } = rootMenu()
     return { text: title, buttons }
   }
+  if (text === '/card') {
+    const cardData = await buildAgentCardData(userKey)
+    return {
+      text: renderAgentCardText(cardData),
+      buttons: [[{ text: '⬅️ 主選單', callback_data: 'm:root' }]],
+      theme: { title: 'Pin' },
+    }
+  }
   if (text === '/help') {
     return helpScreen()
   }
@@ -249,6 +275,11 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
   await appendHistory(userKey, 'user', text, msg.userDisplayName, msg.userHandle)
   const result = await legacyRoute({ chatId: userKey, user, text, now: new Date() })
   await appendHistory(userKey, 'assistant', result.reply, msg.userDisplayName, msg.userHandle)
+  // LLM fallback counter — only when the route actually went through the LLM brain.
+  // The 越低越強 line on the agent card hangs on this.
+  if (result.via === 'llm' || result.via === 'fallback') {
+    void incrementStat(userKey, 'llmFallbacks')
+  }
   console.log(`[route] user=${userKey} via=${result.via} skill=${result.skill?.id ?? 'none'} text="${text.slice(0, 60)}"`)
   return { text: result.reply }
 }

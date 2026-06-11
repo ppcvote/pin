@@ -12,6 +12,7 @@
  */
 
 import { loadUser, saveUser } from '../storage/jsonStore.js'
+import { incrementStat } from './stats.js'
 import type { Button, Channel } from '../channels/types.js'
 
 const MAX_ATTEMPTS = 3
@@ -36,6 +37,7 @@ export async function deliverWithRetry(
     try {
       await channel.sendDirect(userId, text, buttons)
       if (attempt > 1) console.log(`[deliver] user=${userKey} ok on attempt ${attempt}`)
+      void incrementStat(userKey, 'pushes')
       return { ok: true, attempts: attempt }
     } catch (err) {
       lastError = (err as Error).message ?? String(err)

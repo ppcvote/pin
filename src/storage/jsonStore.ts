@@ -49,6 +49,8 @@ export interface UserRecord {
   failed_pushes?: FailedPush[]
   /** Outstanding binding tokens (one per pending product link). Expires in 10 min. */
   binding_tokens?: BindingToken[]
+  /** Weekly usage counters, keyed by ISO week. Used by agent card render. */
+  stats?: Record<string, { actions: number; pushes: number; llmFallbacks: number; piiRedactions?: number }>
 }
 
 export interface Reminder {
