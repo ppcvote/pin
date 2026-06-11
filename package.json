@@ -12,7 +12,9 @@
     "dev": "tsx watch src/bot.ts",
     "start": "node dist/bot.js",
     "mcp": "node dist/mcp/server.js",
-    "mcp:dev": "tsx src/mcp/server.ts"
+    "mcp:dev": "tsx src/mcp/server.ts",
+    "test": "node --env-file=.env --test test/smoke.test.mjs",
+    "mock:ug": "node scripts/mock-ug-server.mjs"
   },
   "dependencies": {
     "@line/bot-sdk": "^11.0.1",

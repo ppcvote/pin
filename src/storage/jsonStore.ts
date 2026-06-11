@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, rename } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 
@@ -112,7 +112,14 @@ export async function loadUser(chatId: string): Promise<UserRecord | null> {
 export async function saveUser(record: UserRecord): Promise<void> {
   const file = userFile(record.chatId)
   await mkdir(dirname(file), { recursive: true })
-  await writeFile(file, JSON.stringify(record, null, 2), 'utf-8')
+  // Atomic write — write to a per-process/per-call temp file, then rename.
+  // Two concurrent turns on the same user would otherwise produce a
+  // "JSON appended after JSON" file (caught in the autonomous dogfood
+  // drill on 2026-06-12 when agent-mode + cron + handler all wrote
+  // user state at once).
+  const tmp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 6)}.tmp`
+  await writeFile(tmp, JSON.stringify(record, null, 2), 'utf-8')
+  await rename(tmp, file)
 }
 
 export async function ensureUser(
