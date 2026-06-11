@@ -56,7 +56,20 @@ async function fetchChoiceArray(skill: Skill, fromActionId: string, overridePath
 
 /** Build the prompt for whichever arg we're currently collecting. */
 async function promptForArg(skill: Skill, action: ActionDef, arg: ArgSpec, args: Record<string, string>): Promise<WizardOutcome> {
-  // Choice arg — fetch options + render buttons
+  // Static enum — no API call, render arg.options directly
+  if (arg.options && arg.options.length > 0) {
+    const buttons: WizardButton[] = []
+    for (const opt of arg.options) {
+      if (!opt.value || !opt.label) continue
+      const cb = `wz:${arg.name}:${encodeURIComponent(opt.value)}`
+      if (Buffer.byteLength(cb) > 64) continue
+      buttons.push({ text: opt.label.slice(0, 40), callback_data: cb })
+    }
+    buttons.push(NAV_BTN())
+    return { kind: 'prompt_choice', text: `${arg.label ?? arg.name} (${buttons.length - 1} 選 1):`, buttons }
+  }
+
+  // Dynamic enum — fetch via from_action + render
   if (arg.from_action) {
     const arr = await fetchChoiceArray(skill, arg.from_action, arg.from_path, args)
     if (!Array.isArray(arr) || arr.length === 0) {

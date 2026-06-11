@@ -88,11 +88,20 @@ metadata:
             display_key: threads_username
           - name: formula
             label: 選文案公式
-            type: string
-            from_action: list_formulas
-            from_path: formulas
-            select_key: id
-            display_key: description
+            type: enum
+            options:
+              - value: controversial_opinion
+                label: 💥 爭議性觀點 (引討論)
+              - value: curiosity_hook
+                label: 🎯 好奇心鉤子 (拉互動)
+              - value: binary_choice
+                label: ⚖️ A 或 B (拉留言)
+              - value: personal_experience
+                label: 📖 個人經驗 (拉共鳴)
+              - value: list_format
+                label: 📋 條列清單 (好分享)
+              - value: auto
+                label: ✨ 自動選最好
           - name: topic
             label: 想寫什麼主題
             type: string

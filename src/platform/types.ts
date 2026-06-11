@@ -1,9 +1,18 @@
 /* Pin SKILL.md spec — see PIN_SKILL_SPEC.md */
 
+export interface ArgOption {
+  value: string
+  label: string
+}
+
 export interface ArgSpec {
   name: string
   label: string
   type?: 'string' | 'number' | 'enum'
+  /** Static enum — list of {value, label} the wizard renders as buttons.
+   *  Use when you want full control over button text (e.g. localized labels). */
+  options?: ArgOption[]
+  /** Dynamic enum — call this action and render its result as choice buttons. */
   from_action?: string
   /** Path to the array on the from_action response (e.g. "formulas" or "data.accounts").
    *  Falls back to the source action's respond.choices.from when omitted. */

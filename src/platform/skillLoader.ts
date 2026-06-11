@@ -77,6 +77,7 @@ export function loadSkill(skillDir: string): Skill {
             name: x.name,
             label: x.label,
             type: x.type,
+            options: x.options,
             from_action: x.from_action,
             from_path: x.from_path,
             select_key: x.select_key,
