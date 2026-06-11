@@ -4,6 +4,16 @@ import { join, dirname } from 'node:path'
 
 const DATA_ROOT = join(process.cwd(), 'data', 'users')
 
+export interface WizardState {
+  skillId: string
+  actionId: string
+  argIdx: number
+  collected: Record<string, string>
+  /** Generated preview content (when waiting for confirm) */
+  preview?: { content: any; rawText?: string }
+  startedAt: string
+}
+
 export interface UserRecord {
   /** Composite key: "<channel>:<userId>" e.g. "tg:781284060" or "line:Ud8df..." */
   chatId: string
@@ -13,6 +23,8 @@ export interface UserRecord {
   reminders: Reminder[]
   notes: Note[]
   expenses: Expense[]
+  /** In-progress multi-step action */
+  wizard?: WizardState
 }
 
 export interface Reminder {

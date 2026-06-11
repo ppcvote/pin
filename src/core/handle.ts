@@ -1,9 +1,10 @@
-import { ensureUser } from '../storage/jsonStore.js'
+import { ensureUser, loadUser } from '../storage/jsonStore.js'
 import { route as legacyRoute } from '../router.js'
 import { appendHistory } from '../brain/memory.js'
 import { findAction, findSkill, allSkills } from '../platform/registry.js'
 import { rootMenu, skillMenu, parseCallback } from '../platform/menuRenderer.js'
 import { executeAction } from '../platform/actionExecutor.js'
+import { startWizard, processWizardCallback, processWizardText, type WizardOutcome } from '../platform/wizard.js'
 import type { InboundMessage, OutboundReply, Button, ThemeHint } from '../channels/types.js'
 
 const NAV_ROW = (skillId?: string): Button[] => skillId
@@ -62,11 +63,45 @@ function helpScreen(): OutboundReply {
  * The channel-agnostic Pin message handler.
  * Returns a reply or null (when nothing to send).
  */
+function wizardOutcomeToReply(outcome: WizardOutcome, skill?: { pin?: { primary_color?: string; icon?: string }; name?: string }): OutboundReply {
+  const theme: ThemeHint | undefined = skill ? {
+    primaryColor: skill.pin?.primary_color,
+    icon: skill.pin?.icon,
+    title: skill.name,
+  } : undefined
+  const buttons = (outcome as any).buttons as Button[] | undefined
+  const keyboard = buttons && buttons.length > 0 ? [buttons] : undefined
+  return { text: outcome.text, buttons: keyboard, theme }
+}
+
 export async function handlePinMessage(msg: InboundMessage): Promise<OutboundReply | null> {
   // Composite user key for cross-channel isolation. TG digits, LINE alphanumeric, etc.
   // Stored as the jsonStore filename directly — channel prefix prevents collisions.
   const userKey = `${msg.channelId}:${msg.userId}`
-  await ensureUser(userKey, msg.userDisplayName, msg.userHandle)
+  let user = await ensureUser(userKey, msg.userDisplayName, msg.userHandle)
+
+  // ── Active wizard takes priority — intercept text + wizard callbacks ──
+  if (user.wizard) {
+    const skill = findSkill(user.wizard.skillId)
+    if (msg.callback?.startsWith('wz:')) {
+      // Reload to avoid stale state across concurrent turns
+      user = (await loadUser(userKey)) ?? user
+      const outcome = await processWizardCallback(user, msg.callback)
+      if (outcome) return wizardOutcomeToReply(outcome, skill)
+    }
+    if (msg.text && !msg.text.startsWith('/')) {
+      user = (await loadUser(userKey)) ?? user
+      const outcome = await processWizardText(user, msg.text)
+      if (outcome) return wizardOutcomeToReply(outcome, skill)
+    }
+    // If user typed a slash command or non-wizard callback mid-wizard, fall through to normal flow.
+    // Most non-wizard callbacks (m:root, s:..., a:...) silently cancel the wizard:
+    if (msg.callback && !msg.callback.startsWith('wz:')) {
+      user.wizard = undefined
+      const { saveUser } = await import('../storage/jsonStore.js')
+      await saveUser(user)
+    }
+  }
 
   // ── Callback (button tap) ────────────────────────────────────────────
   if (msg.callback) {
@@ -97,10 +132,19 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       if (!found) return { text: 'Action not found' }
       const { skill, action } = found
 
-      // Args check (wizard comes later)
+      // Args still needed? Pre-filled args (from a choices/follow-up button)
+      // count as satisfied. Anything else triggers the wizard.
       const missing = (action.args ?? []).filter(a => !(a.name in parsed.args))
       if (missing.length > 0) {
-        return { text: `此 action (${action.label}) 需要: ${missing.map(a => a.label).join(', ')} — wizard 還在做` }
+        user = (await loadUser(userKey)) ?? user
+        const outcome = await startWizard(user, parsed.skillId, parsed.actionId)
+        // Pre-seed any args the user did supply via callback
+        if (Object.keys(parsed.args).length > 0 && user.wizard) {
+          Object.assign(user.wizard.collected, parsed.args)
+          const { saveUser } = await import('../storage/jsonStore.js')
+          await saveUser(user)
+        }
+        return wizardOutcomeToReply(outcome, skill)
       }
 
       const result = await executeAction(skill, action, parsed.args)
@@ -157,7 +201,6 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
   }
 
   // Free-form text — go through legacy skill router (regex first, LLM fallback)
-  const user = await ensureUser(userKey, msg.userDisplayName, msg.userHandle)
   await appendHistory(userKey, 'user', text, msg.userDisplayName, msg.userHandle)
   const result = await legacyRoute({ chatId: userKey, user, text, now: new Date() })
   await appendHistory(userKey, 'assistant', result.reply, msg.userDisplayName, msg.userHandle)
