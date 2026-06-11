@@ -194,10 +194,44 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       return {
         text,
         buttons: [[
+          { text: '🖼️ 產生分享圖', callback_data: 'card_share' },
+        ], [
           { text: '⬅️ 主選單', callback_data: 'm:root' },
         ]],
         theme: { title: 'Pin' },
         edit: true,
+      }
+    }
+
+    // System-injected: share PNG card
+    if (data === 'card_share') {
+      try {
+        const { renderCardPng } = await import('../runtime/cardRenderer.js')
+        const { saveTempBlob } = await import('../runtime/tempStore.js')
+        const cardData = await buildAgentCardData(userKey)
+        const png = renderCardPng(cardData, userKey)
+        const ref = saveTempBlob(png, 'image/png')
+        const filename = ref.slice(4)  // strip "tmp:"
+        const baseUrl = process.env.PIN_PUBLIC_URL ?? ''
+        if (!baseUrl) {
+          return { text: '⚠️ 分享圖需要 PIN_PUBLIC_URL 設定 (公網 URL). 請聯絡管理員。' }
+        }
+        const imageUrl = `${baseUrl.replace(/\/$/, '')}/image/${filename}`
+        const caption = `我的 agent 本週零幻覺完成 ${cardData.stats.actions} 次操作 ⚡ pin`
+        // Render via the active channel adapter (we don't have channel ref here in handle.ts;
+        // returning a special OutboundReply.kind would be cleaner — but channels can also
+        // pull the image via the URL in the reply. For now, fall through with a public link.)
+        return {
+          text: `📸 分享圖好了\n${caption}\n\n🔗 ${imageUrl}\n(連結 30 分鐘內有效)`,
+          buttons: [[
+            { text: '🔗 開分享圖', url: imageUrl },
+            { text: '⬅️ 返回卡片', callback_data: 'card' },
+          ]],
+          theme: { title: 'Pin' },
+        }
+      } catch (err) {
+        console.error('[card_share]', err)
+        return { text: '產生分享圖失敗 😢' }
       }
     }
 

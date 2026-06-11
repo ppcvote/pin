@@ -62,6 +62,13 @@ export class TelegramChannel implements Channel {
     await this.bot.telegram.sendMessage(id, text, buttons ? { reply_markup: { inline_keyboard: toTgKeyboard(buttons) } } : undefined)
   }
 
+  /** TG accepts raw image bytes via sendPhoto. */
+  async sendImage(userId: string, png: Buffer, _imageUrl: string, caption?: string): Promise<void> {
+    const id = Number(userId)
+    if (Number.isNaN(id)) return
+    await this.bot.telegram.sendPhoto(id, { source: png }, caption ? { caption: caption.slice(0, 1024) } : undefined)
+  }
+
   private async dispatch(
     ctx: any,
     payload: { text?: string; callback?: string; isCallback?: boolean }

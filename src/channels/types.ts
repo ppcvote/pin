@@ -61,4 +61,9 @@ export interface Channel {
   stop(): Promise<void>
   /** Send an unsolicited message (used by cron jobs like reminders). */
   sendDirect(userId: string, text: string, buttons?: Button[][]): Promise<void>
+  /**
+   * Send an image. TG can take raw bytes; LINE needs a public URL
+   * (callers should host the image somewhere reachable + pass the URL here).
+   */
+  sendImage(userId: string, png: Buffer, imageUrl: string, caption?: string): Promise<void>
 }

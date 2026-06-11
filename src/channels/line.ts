@@ -146,6 +146,19 @@ export class LineChannel implements Channel {
     await this.client.pushMessage({ to: userId, messages })
   }
 
+  /** LINE image message requires HTTPS URLs (no bytes). Caller passes the URL. */
+  async sendImage(userId: string, _png: Buffer, imageUrl: string, caption?: string): Promise<void> {
+    const messages: any[] = [
+      {
+        type: 'image',
+        originalContentUrl: imageUrl,
+        previewImageUrl: imageUrl,
+      },
+    ]
+    if (caption) messages.push({ type: 'text', text: caption.slice(0, 400) })
+    await this.client.pushMessage({ to: userId, messages })
+  }
+
   /**
    * Called by the HTTP server when /line/webhook receives a POST.
    * `rawBody` MUST be the unmodified bytes for signature validation.

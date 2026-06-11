@@ -39,9 +39,13 @@ export function saveTempBlob(data: Buffer, mime: string): string {
 /** Read a buffer previously saved with saveTempBlob. */
 export function readTempBlob(ref: string): { data: Buffer; mime: string } | null {
   if (!ref.startsWith('tmp:')) return null
-  const name = ref.slice(4)
+  return readByName(ref.slice(4))
+}
+
+/** Read by direct filename (used by the public /image/<file> endpoint). */
+export function readByName(name: string): { data: Buffer; mime: string } | null {
   // Reject path traversal
-  if (name.includes('/') || name.includes('\\') || name.includes('..')) return null
+  if (!name || name.includes('/') || name.includes('\\') || name.includes('..')) return null
   const path = join(TMP_ROOT, name)
   if (!existsSync(path)) return null
   let mime = 'application/octet-stream'

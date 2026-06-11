@@ -6,6 +6,7 @@ import { deliverWithRetry } from '../runtime/deliver.js'
 import { consumeBindingToken } from '../platform/binding.js'
 import { createBindToken } from '../storage/bindTokens.js'
 import { findSkill } from '../platform/registry.js'
+import { readByName } from '../runtime/tempStore.js'
 import type { Channel, Button } from '../channels/types.js'
 import type { LineChannel } from '../channels/line.js'
 
@@ -86,6 +87,27 @@ export function startWebhookServer(channels: Channel[]): http.Server {
     if (req.method === 'GET' && req.url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: true, service: 'pin', version: '0.1.0' }))
+      return
+    }
+
+    // Public scratch-blob endpoint — serves files written by tempStore.saveTempBlob.
+    // Used by LINE image messaging (it can't accept raw bytes, needs an HTTPS URL).
+    // Random filenames + 30-min TTL provide adequate URL-as-secret protection;
+    // the path-traversal guard sits inside readByName.
+    const imgMatch = req.method === 'GET' && req.url?.match(/^\/image\/([a-z0-9.]+)$/i)
+    if (imgMatch) {
+      const blob = readByName(imgMatch[1])
+      if (!blob) {
+        res.writeHead(404)
+        res.end()
+        return
+      }
+      res.writeHead(200, {
+        'Content-Type': blob.mime,
+        'Content-Length': blob.data.length,
+        'Cache-Control': 'public, max-age=600',
+      })
+      res.end(blob.data)
       return
     }
 
