@@ -56,7 +56,9 @@ const udhouse: Skill = {
       const listings = await listListings()
       if (listings.length === 0) return '📭 目前沒有物件'
 
-      const sorted = [...listings].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
+      // UDH API returns created_at as a Unix timestamp (number), not a string,
+      // so localeCompare blows up. Coerce + numeric sort, newest first.
+      const sorted = [...listings].sort((a, b) => Number(b.created_at ?? 0) - Number(a.created_at ?? 0))
       const lines = sorted.slice(0, 8).map((l, i) => {
         const title = l.title || l.address || `物件 ${l.id}`
         const price = l.price ? ` · $${l.price.toLocaleString()}` : ''
