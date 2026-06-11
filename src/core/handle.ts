@@ -153,6 +153,44 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       return { text: view.title, buttons, edit: true, theme }
     }
 
+    // System-injected: agent-mode mutation confirmation
+    if (data.startsWith('agent_confirm:')) {
+      const pendingId = data.slice('agent_confirm:'.length)
+      user = (await loadUser(userKey)) ?? user
+      const pending = user.agent_pending
+      if (!pending || pending.pendingId !== pendingId) {
+        return { text: '⏰ 確認已失效, 請重新對 agent 下指令' }
+      }
+      if (new Date(pending.expiresAt).getTime() < Date.now()) {
+        user.agent_pending = undefined
+        await saveUser(user)
+        return { text: '⏰ 確認已過期, 請重新對 agent 下指令' }
+      }
+      const found = findAction(pending.skillId, pending.actionId)
+      if (!found) {
+        user.agent_pending = undefined
+        await saveUser(user)
+        return { text: 'Action 已不存在' }
+      }
+      const { skill, action } = found
+      user.agent_pending = undefined
+      await saveUser(user)
+      const result = await executeAction(skill, action, pending.args)
+      void incrementStat(userKey, 'actions')
+      const replyText = result.ok
+        ? (result.rendered ?? '✅ 完成')
+        : `${action.label} 失敗: ${result.error}`
+      const theme: ThemeHint = { primaryColor: skill.pin?.primary_color, icon: skill.pin?.icon, title: skill.name }
+      return {
+        text: replyText,
+        buttons: [[
+          { text: `⬅️ ${skill.name}`, callback_data: `s:${skill.id}` },
+          { text: '🏠 主選單', callback_data: 'm:root' },
+        ]],
+        theme,
+      }
+    }
+
     // System-injected: unbind flow (confirm → delete binding)
     if (data.startsWith('unbind:')) {
       const skillId = data.slice('unbind:'.length)
@@ -414,6 +452,35 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
                  buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
       }
       const { skill, action } = found
+
+      // PIN_AGENT_MODE §4.2 — force preview on agent-triggered mutations.
+      const isMutation = ['POST', 'PUT', 'DELETE'].includes(action.api?.method ?? '')
+      const hasNativePreview = !!action.preview
+      if (isMutation && !hasNativePreview) {
+        const crypto = await import('node:crypto')
+        const pendingId = crypto.randomBytes(4).toString('hex')
+        user = (await loadUser(userKey)) ?? user
+        user.agent_pending = {
+          pendingId,
+          skillId: skill.id,
+          actionId: action.id,
+          args: decision.args ?? {},
+          expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+        }
+        await saveUser(user)
+        const argLines = Object.entries(decision.args ?? {})
+          .map(([k, v]) => `   • ${k}: ${String(v).slice(0, 100)}`)
+          .join('\n')
+        return {
+          text: `🤖 我打算執行: ${skill.pin?.icon ?? ''} ${action.label}\n\n參數:\n${argLines || '   (無)'}\n\n⚠️ 這個動作會寫入資料, 先確定再動?\n\n🧠×1`,
+          buttons: [[
+            { text: '✅ 確定執行', callback_data: `agent_confirm:${pendingId}` },
+            { text: '❌ 取消', callback_data: 'm:root' },
+          ]],
+          theme: { primaryColor: skill.pin?.primary_color, icon: skill.pin?.icon, title: skill.name },
+        }
+      }
+
       const missing = (action.args ?? []).filter(a => !(a.name in (decision.args ?? {})))
       if (missing.length > 0) {
         // Start wizard pre-seeded with what the LLM did supply

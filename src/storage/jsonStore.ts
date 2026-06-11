@@ -55,6 +55,18 @@ export interface UserRecord {
   bindings?: Record<string, { tenantKey: string; boundAt: string }>
   /** Bind redemption rate limit — counter resets each hour bucket. */
   bind_attempts?: { hourBucket: string; count: number }
+  /**
+   * Pending agent-triggered mutation awaiting confirmation. PIN_AGENT_MODE §4.2:
+   * POST/PUT/DELETE actions chosen by the LLM go through a forced preview
+   * even when the SKILL doesn't declare one.
+   */
+  agent_pending?: {
+    pendingId: string
+    skillId: string
+    actionId: string
+    args: Record<string, any>
+    expiresAt: string
+  }
 }
 
 export interface Reminder {
