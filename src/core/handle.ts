@@ -454,6 +454,34 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       theme: { title: 'Pin' },
     }
   }
+  if (text === '/stats') {
+    const { getCurrentWeekStats, getCurrentWeekAgentStats } = await import('../runtime/stats.js')
+    const s = await getCurrentWeekStats(userKey)
+    const a = await getCurrentWeekAgentStats(userKey)
+    const total = a.execute + a.clarify + a.none + a.fallback + a.blocked
+    const downgrade = total > 0 ? Math.round(((a.clarify + a.none + a.fallback) / total) * 100) : 0
+    return {
+      text: [
+        '📈 本週 dogfood 數字',
+        '━━━━━━━━━━━━━━━━━',
+        `🛠 按鈕操作: ${s.actions}`,
+        `📨 推播送達: ${s.pushes}`,
+        `🧠 LLM 介入: ${s.llmFallbacks}`,
+        '',
+        '🤖 Agent 模式分布:',
+        `   ✅ execute  ${a.execute}`,
+        `   🤔 clarify  ${a.clarify}`,
+        `   💬 none     ${a.none}`,
+        `   🛡 blocked  ${a.blocked}`,
+        `   ⚠ fallback ${a.fallback}`,
+        total > 0 ? `   降級率: ${downgrade}%  (clarify+none+fallback)` : '   (尚無 agent 樣本)',
+      ].join('\n'),
+      buttons: [[
+        { text: '🃏 看卡片', callback_data: 'card' },
+        { text: '🏠 主選單', callback_data: 'm:root' },
+      ]],
+    }
+  }
   if (text === '/help') {
     return helpScreen()
   }
