@@ -8,6 +8,8 @@ import { startWizard, processWizardCallback, processWizardText, processWizardIma
 import { createBindingToken } from '../platform/binding.js'
 import { buildAgentCardData, renderAgentCardText } from '../platform/agentCard.js'
 import { incrementStat } from '../runtime/stats.js'
+import { redeemBindToken } from '../storage/bindTokens.js'
+import { saveUser } from '../storage/jsonStore.js'
 import type { InboundMessage, OutboundReply, Button, ThemeHint } from '../channels/types.js'
 
 const NAV_ROW = (skillId?: string): Button[] => skillId
@@ -252,6 +254,30 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
   // ── Text input ────────────────────────────────────────────────────────
   const text = (msg.text ?? '').trim()
   if (!text) return null
+
+  // Bind-token redemption — supports two forms:
+  //   - LINE: user opens prefilled message "bind <token>"
+  //   - TG:   /start <token> (telegraf passes the payload as the message text)
+  const bindMatch = text.match(/^(?:bind|\/start)\s+([a-f0-9]{32})\s*$/i)
+  if (bindMatch) {
+    const token = bindMatch[1].toLowerCase()
+    const entry = await redeemBindToken(token)
+    if (!entry) {
+      return { text: '🔒 連結已失效, 請回到產品頁面重新點擊' }
+    }
+    const skill = findSkill(entry.skillName)
+    if (!skill) return { text: '🔒 連結已失效, 請回到產品頁面重新點擊' }
+    const u = await ensureUser(userKey, msg.userDisplayName, msg.userHandle)
+    u.bindings = { ...(u.bindings ?? {}), [entry.skillName]: { tenantKey: entry.tenantKey, boundAt: new Date().toISOString() } }
+    await saveUser(u)
+    const icon = skill.pin?.icon ?? '•'
+    const view = skillMenu(skill.id)
+    return {
+      text: `✅ 已連接 ${icon} ${skill.name}\n\n（tenant: ${entry.tenantKey}）`,
+      buttons: view?.buttons,
+      theme: { primaryColor: skill.pin?.primary_color, icon, title: skill.name },
+    }
+  }
 
   // Slash commands
   if (text === '/start') {

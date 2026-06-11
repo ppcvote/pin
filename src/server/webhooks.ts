@@ -4,6 +4,8 @@ import { findWebhook } from '../platform/registry.js'
 import { render } from '../platform/template.js'
 import { deliverWithRetry } from '../runtime/deliver.js'
 import { consumeBindingToken } from '../platform/binding.js'
+import { createBindToken } from '../storage/bindTokens.js'
+import { findSkill } from '../platform/registry.js'
 import type { Channel, Button } from '../channels/types.js'
 import type { LineChannel } from '../channels/line.js'
 
@@ -84,6 +86,56 @@ export function startWebhookServer(channels: Channel[]): http.Server {
     if (req.method === 'GET' && req.url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: true, service: 'pin', version: '0.1.0' }))
+      return
+    }
+
+    // PIN_ONBOARDING §A — product-initiated bind token. Returns {token, expiresAt}.
+    // Auth: productApiKey must match the skill's webhook secret env var.
+    if (req.method === 'POST' && req.url === '/bind/token') {
+      const chunks: Buffer[] = []
+      let total = 0
+      for await (const chunk of req) {
+        const buf = typeof chunk === 'string' ? Buffer.from(chunk, 'utf-8') : (chunk as Buffer)
+        total += buf.length
+        if (total > 4096) { res.writeHead(413); res.end(); return }
+        chunks.push(buf)
+      }
+      let payload: { skillName?: string; tenantKey?: string; productApiKey?: string }
+      try { payload = JSON.parse(Buffer.concat(chunks).toString('utf-8')) } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'invalid_json' }))
+        return
+      }
+      if (!payload.skillName || !payload.tenantKey || !payload.productApiKey) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'skillName_tenantKey_productApiKey_required' }))
+        return
+      }
+      const skill = findSkill(payload.skillName)
+      if (!skill) {
+        res.writeHead(404, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'unknown_skill' }))
+        return
+      }
+      // Verify the productApiKey: use the first declared webhook secret on the skill
+      // (skills that don't ship webhooks can't issue bind tokens — they have nothing to push)
+      const secretEnvName = skill.pin?.webhooks?.[0]?.secret
+      if (!secretEnvName) {
+        res.writeHead(403, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'skill_does_not_support_binding' }))
+        return
+      }
+      const expected = process.env[secretEnvName]
+      if (!expected || expected !== payload.productApiKey) {
+        console.warn(`[bind/token] auth fail skill=${payload.skillName}`)
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'bad_product_api_key' }))
+        return
+      }
+      const entry = await createBindToken(payload.skillName, payload.tenantKey)
+      console.log(`[bind/token] issued skill=${entry.skillName} tenant=${entry.tenantKey} ttl_min=10`)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ token: entry.token, expiresAt: entry.expiresAt }))
       return
     }
 

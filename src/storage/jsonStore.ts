@@ -51,6 +51,8 @@ export interface UserRecord {
   binding_tokens?: BindingToken[]
   /** Weekly usage counters, keyed by ISO week. Used by agent card render. */
   stats?: Record<string, { actions: number; pushes: number; llmFallbacks: number; piiRedactions?: number }>
+  /** Active product bindings. Keyed by skill name. */
+  bindings?: Record<string, { tenantKey: string; boundAt: string }>
 }
 
 export interface Reminder {
