@@ -70,6 +70,17 @@ function helpScreen(): OutboundReply {
  * The channel-agnostic Pin message handler.
  * Returns a reply or null (when nothing to send).
  */
+/** Insert a "🔓 解除連接" button on a skill menu when the user has it bound. */
+function withUnbindButton(buttons: Button[][], skillId: string, isBound: boolean): Button[][] {
+  if (!isBound) return buttons
+  const out = buttons.map(row => [...row])
+  // Insert before the trailing nav row (last row)
+  const navRow = out.pop()
+  out.push([{ text: '🔓 解除連接', callback_data: `unbind:${skillId}` }])
+  if (navRow) out.push(navRow)
+  return out
+}
+
 function wizardOutcomeToReply(outcome: WizardOutcome, skill?: { pin?: { primary_color?: string; icon?: string }; name?: string }): OutboundReply {
   const theme: ThemeHint | undefined = skill ? {
     primaryColor: skill.pin?.primary_color,
@@ -132,12 +143,48 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       const view = skillMenu(parsed.skillId)
       if (!view) return { text: 'Skill not found', edit: true }
       const skill = findSkill(parsed.skillId)
+      const isBound = !!user.bindings?.[parsed.skillId]
+      const buttons = withUnbindButton(view.buttons, parsed.skillId, isBound)
       const theme: ThemeHint = {
         primaryColor: skill?.pin?.primary_color,
         icon: skill?.pin?.icon,
         title: skill?.name,
       }
-      return { text: view.title, buttons: view.buttons, edit: true, theme }
+      return { text: view.title, buttons, edit: true, theme }
+    }
+
+    // System-injected: unbind flow (confirm → delete binding)
+    if (data.startsWith('unbind:')) {
+      const skillId = data.slice('unbind:'.length)
+      const skill = findSkill(skillId)
+      if (!skill) return { text: 'Skill not found' }
+      if (!user.bindings?.[skillId]) {
+        return { text: '此 skill 目前沒有綁定' }
+      }
+      const icon = skill.pin?.icon ?? '•'
+      return {
+        text: `⚠️ 確定要解除連接 ${icon} ${skill.name}?\n\n之後該產品的通知會停止推送,直到你重新從產品端綁定。`,
+        buttons: [[
+          { text: '✅ 確定解除', callback_data: `unbind_confirm:${skillId}` },
+          { text: '❌ 取消', callback_data: `s:${skillId}` },
+        ]],
+        theme: { primaryColor: skill.pin?.primary_color, icon, title: skill.name },
+      }
+    }
+    if (data.startsWith('unbind_confirm:')) {
+      const skillId = data.slice('unbind_confirm:'.length)
+      const skill = findSkill(skillId)
+      if (!skill) return { text: 'Skill not found' }
+      const u = await ensureUser(userKey, msg.userDisplayName, msg.userHandle)
+      if (u.bindings && skillId in u.bindings) {
+        delete u.bindings[skillId]
+        await saveUser(u)
+      }
+      console.log(`[unbind] user=${userKey} skill=${skillId}`)
+      return {
+        text: `🔓 已解除 ${skill.pin?.icon ?? '•'} ${skill.name} 連接`,
+        buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]],
+      }
     }
 
     // System-injected: agent card
@@ -262,6 +309,17 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
   //   - TG:   /start <token> (telegraf passes the payload as the message text)
   const bindMatch = text.match(/^(?:bind|\/start)\s+([a-f0-9]{32})\s*$/i)
   if (bindMatch) {
+    // Rate limit: 10 attempts/hour per user. Silently swallow above the cap.
+    const u = await ensureUser(userKey, msg.userDisplayName, msg.userHandle)
+    const hourBucket = new Date().toISOString().slice(0, 13)  // "2026-06-12T01"
+    if (u.bind_attempts && u.bind_attempts.hourBucket === hourBucket && u.bind_attempts.count >= 10) {
+      console.warn(`[bind redeem] rate-limited user=${userKey}`)
+      return null  // silent ignore
+    }
+    u.bind_attempts = { hourBucket,
+      count: (u.bind_attempts?.hourBucket === hourBucket ? u.bind_attempts.count : 0) + 1 }
+    await saveUser(u)
+
     const token = bindMatch[1].toLowerCase()
     const entry = await redeemBindToken(token)
     if (!entry) {
@@ -269,14 +327,14 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     }
     const skill = findSkill(entry.skillName)
     if (!skill) return { text: '🔒 連結已失效, 請回到產品頁面重新點擊' }
-    const u = await ensureUser(userKey, msg.userDisplayName, msg.userHandle)
     u.bindings = { ...(u.bindings ?? {}), [entry.skillName]: { tenantKey: entry.tenantKey, boundAt: new Date().toISOString() } }
     await saveUser(u)
     const icon = skill.pin?.icon ?? '•'
     const view = skillMenu(skill.id)
+    const buttons = view ? withUnbindButton(view.buttons, skill.id, true) : undefined
     return {
       text: `✅ 已連接 ${icon} ${skill.name}\n\n（tenant: ${entry.tenantKey}）`,
-      buttons: view?.buttons,
+      buttons,
       theme: { primaryColor: skill.pin?.primary_color, icon, title: skill.name },
     }
   }

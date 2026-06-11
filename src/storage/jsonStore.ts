@@ -53,6 +53,8 @@ export interface UserRecord {
   stats?: Record<string, { actions: number; pushes: number; llmFallbacks: number; piiRedactions?: number }>
   /** Active product bindings. Keyed by skill name. */
   bindings?: Record<string, { tenantKey: string; boundAt: string }>
+  /** Bind redemption rate limit — counter resets each hour bucket. */
+  bind_attempts?: { hourBucket: string; count: number }
 }
 
 export interface Reminder {
