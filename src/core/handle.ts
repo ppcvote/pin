@@ -1,10 +1,10 @@
 import { ensureUser } from '../storage/jsonStore.js'
 import { route as legacyRoute } from '../router.js'
 import { appendHistory } from '../brain/memory.js'
-import { findAction, allSkills } from '../platform/registry.js'
+import { findAction, findSkill, allSkills } from '../platform/registry.js'
 import { rootMenu, skillMenu, parseCallback } from '../platform/menuRenderer.js'
 import { executeAction } from '../platform/actionExecutor.js'
-import type { InboundMessage, OutboundReply, Button } from '../channels/types.js'
+import type { InboundMessage, OutboundReply, Button, ThemeHint } from '../channels/types.js'
 
 const NAV_ROW = (skillId?: string): Button[] => skillId
   ? [{ text: `⬅️ 返回`, callback_data: `s:${skillId}` }, { text: '🏠 主選單', callback_data: 'm:root' }]
@@ -63,9 +63,9 @@ function helpScreen(): OutboundReply {
  * Returns a reply or null (when nothing to send).
  */
 export async function handlePinMessage(msg: InboundMessage): Promise<OutboundReply | null> {
-  // Ensure user record exists in our store (using channel-prefixed id for cross-channel uniqueness later)
-  const userKey = Number(msg.userId) || 0  // for now jsonStore keys are numbers (TG-only legacy)
-  if (!userKey) return { text: 'unsupported user id format' }
+  // Composite user key for cross-channel isolation. TG digits, LINE alphanumeric, etc.
+  // Stored as the jsonStore filename directly — channel prefix prevents collisions.
+  const userKey = `${msg.channelId}:${msg.userId}`
   await ensureUser(userKey, msg.userDisplayName, msg.userHandle)
 
   // ── Callback (button tap) ────────────────────────────────────────────
@@ -79,12 +79,18 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
 
     if (parsed.kind === 'root') {
       const { title, buttons } = rootMenu()
-      return { text: title, buttons, edit: true }
+      return { text: title, buttons, edit: true, theme: { title: 'Pin' } }
     }
     if (parsed.kind === 'skill') {
       const view = skillMenu(parsed.skillId)
       if (!view) return { text: 'Skill not found', edit: true }
-      return { text: view.title, buttons: view.buttons, edit: true }
+      const skill = findSkill(parsed.skillId)
+      const theme: ThemeHint = {
+        primaryColor: skill?.pin?.primary_color,
+        icon: skill?.pin?.icon,
+        title: skill?.name,
+      }
+      return { text: view.title, buttons: view.buttons, edit: true, theme }
     }
     if (parsed.kind === 'action') {
       const found = findAction(parsed.skillId, parsed.actionId)
@@ -121,7 +127,12 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       }
       if (result.choices) for (const c of result.choices) keyboard.push([c])
       keyboard.push(NAV_ROW(skill.id))
-      return { text, buttons: keyboard }
+      const theme: ThemeHint = {
+        primaryColor: skill.pin?.primary_color,
+        icon: skill.pin?.icon,
+        title: skill.name,
+      }
+      return { text, buttons: keyboard, theme }
     }
     return { text: 'unknown button' }
   }

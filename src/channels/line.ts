@@ -1,55 +1,117 @@
 import { messagingApi, validateSignature, webhook } from '@line/bot-sdk'
-import type { Button, Channel, MessageHandler, InboundMessage } from './types.js'
+import type { Button, Channel, MessageHandler, InboundMessage, ThemeHint } from './types.js'
+import { PIN_NEUTRAL, PIN_SIGNATURE, resolveTheme } from './design.js'
 
 const { MessagingApiClient } = messagingApi
 type WebhookEvent = webhook.Event
 
+/** Identify nav buttons (back / home) so we render them subtly. */
+function isNavButton(b: Button): boolean {
+  return typeof b.callback_data === 'string' && (b.callback_data === 'm:root' || /^s:[^:]+$/.test(b.callback_data))
+}
+
 /**
- * Build a LINE outbound message from Pin's channel-agnostic Button[][] shape.
+ * Build a LINE outbound message from Pin's channel-agnostic shape, themed
+ * with the skill's brand color + icon. Returns 1 message.
  *
- * Single text → text message.
- * Text + buttons → Flex bubble (text + button stack). Buttons are stacked
- * vertically (LINE Flex). markdown is stripped (LINE doesn't render it).
+ * Layout (Flex bubble):
+ *   [ header  — primary_color background, icon + title + ·Pin ]
+ *   [ body    — cream background, text + buttons ]
  */
-function buildMessages(text: string, buttons?: Button[][]): any[] {
+function buildMessages(text: string, buttons?: Button[][], theme?: ThemeHint): any[] {
   const plain = text.replace(/\*\*(.+?)\*\*/g, '$1').replace(/__(.+?)__/g, '$1')
+
+  // No buttons → plain text (LINE caps at 5000 chars). Theme is wasted here, skip Flex.
   if (!buttons || buttons.length === 0) {
-    // Plain text — LINE caps a text message at 5000 chars
     return [{ type: 'text', text: plain.slice(0, 5000) }]
   }
 
+  const t = resolveTheme(theme)
   const flat = buttons.flat()
-  const components: any[] = [{ type: 'text', text: plain.slice(0, 2000), wrap: true, size: 'sm' }]
 
+  // Strip the title line from body text if it duplicates the header title.
+  // (Our skillMenu emits "🧵 mindthread\n\ndesc" — the first line becomes the
+  // Flex header, so we don't double-render it in the body.)
+  let bodyText = plain
+  if (t.title) {
+    const titlePrefix1 = `${t.icon} ${t.title}`
+    const titlePrefix2 = t.title
+    if (bodyText.startsWith(titlePrefix1)) bodyText = bodyText.slice(titlePrefix1.length).trimStart()
+    else if (bodyText.startsWith(titlePrefix2)) bodyText = bodyText.slice(titlePrefix2.length).trimStart()
+  }
+
+  // ── Body components ─────────────────────────────────────────
+  const bodyComponents: any[] = []
+  if (bodyText.trim()) {
+    bodyComponents.push({
+      type: 'text',
+      text: bodyText.slice(0, 2000),
+      wrap: true,
+      size: 'sm',
+      color: PIN_NEUTRAL.mutedText,
+    })
+    bodyComponents.push({ type: 'separator', margin: 'md', color: PIN_NEUTRAL.border })
+  }
+
+  // ── Buttons ─────────────────────────────────────────────────
   for (const b of flat) {
     const label = (b.text ?? '').slice(0, 40) || '·'
     if (b.url) {
-      components.push({
+      // External link → outline style, neutral
+      bodyComponents.push({
         type: 'button',
         style: 'secondary',
+        color: PIN_NEUTRAL.secondaryBg,
         height: 'sm',
         action: { type: 'uri', label, uri: b.url.slice(0, 1000) },
       })
     } else if (b.callback_data) {
-      components.push({
-        type: 'button',
-        style: 'primary',
-        height: 'sm',
-        action: { type: 'postback', label, data: b.callback_data.slice(0, 300), displayText: label },
-      })
+      const isNav = isNavButton(b)
+      if (isNav) {
+        bodyComponents.push({
+          type: 'button',
+          style: 'link',
+          height: 'sm',
+          action: { type: 'postback', label, data: b.callback_data.slice(0, 300), displayText: label },
+        })
+      } else {
+        bodyComponents.push({
+          type: 'button',
+          style: 'primary',
+          color: t.primaryColor,
+          height: 'sm',
+          action: { type: 'postback', label, data: b.callback_data.slice(0, 300), displayText: label },
+        })
+      }
     }
+  }
+
+  // ── Header (skill icon + name + Pin signature) ─────────────
+  const headerTitle = t.title ? `${t.icon} ${t.title}` : t.icon
+  const header = {
+    type: 'box',
+    layout: 'horizontal',
+    paddingAll: 'md',
+    backgroundColor: t.primaryColor,
+    contents: [
+      { type: 'text', text: headerTitle, weight: 'bold', color: t.headerTextColor, size: 'md', flex: 4 },
+      { type: 'text', text: PIN_SIGNATURE, color: t.headerTextColor, size: 'xs', align: 'end', flex: 1, gravity: 'center' },
+    ],
   }
 
   return [{
     type: 'flex',
-    altText: plain.slice(0, 400),
+    altText: plain.slice(0, 400) || `${t.title} ${PIN_SIGNATURE}`,
     contents: {
       type: 'bubble',
+      header,
       body: {
         type: 'box',
         layout: 'vertical',
         spacing: 'sm',
-        contents: components,
+        backgroundColor: PIN_NEUTRAL.cream,
+        paddingAll: 'md',
+        contents: bodyComponents.length ? bodyComponents : [{ type: 'text', text: ' ', size: 'xs' }],
       },
     },
   }]
@@ -75,6 +137,9 @@ export class LineChannel implements Channel {
   async stop(): Promise<void> {}
 
   async sendDirect(userId: string, text: string, buttons?: Button[][]): Promise<void> {
+    // sendDirect is used for unsolicited webhook notifications. No theme passed
+    // here; if we wanted webhook themes too the Channel interface would need to
+    // carry them — keep that for when push notifications need branding.
     const messages = buildMessages(text, buttons)
     await this.client.pushMessage({ to: userId, messages })
   }
@@ -142,7 +207,7 @@ export class LineChannel implements Channel {
     const reply = await this.handler(inbound)
     if (!reply) return
 
-    const messages = buildMessages(reply.text, reply.buttons)
+    const messages = buildMessages(reply.text, reply.buttons, reply.theme)
 
     // LINE doesn't support edit-in-place; reply.edit is ignored.
     // Prefer replyToken (free + within 30s window); fall back to push.

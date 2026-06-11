@@ -69,6 +69,8 @@ export function startWebhookServer(channels: Channel[]): http.Server {
   const channelById = new Map(channels.map(c => [c.id, c]))
 
   const server = http.createServer(async (req, res) => {
+    console.log(`[http] ${req.method} ${req.url} ua=${(req.headers['user-agent'] ?? '').slice(0, 60)}`)
+
     if (req.method === 'GET' && req.url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: true, service: 'pin', version: '0.1.0' }))

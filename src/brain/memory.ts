@@ -11,7 +11,7 @@ const MAX_HISTORY = 20
 
 /** Add to history with rolling cap. */
 export async function appendHistory(
-  chatId: number,
+  chatId: string,
   role: 'user' | 'assistant',
   text: string,
   firstName?: string,
@@ -27,7 +27,7 @@ export async function appendHistory(
 }
 
 /** Last N messages. */
-export async function recentHistory(chatId: number, n: number = 8): Promise<HistoryEntry[]> {
+export async function recentHistory(chatId: string, n = 8): Promise<HistoryEntry[]> {
   const user = await loadUser(chatId)
   if (!user) return []
   const u = user as UserRecord & { history?: HistoryEntry[] }

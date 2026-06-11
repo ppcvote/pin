@@ -1,7 +1,7 @@
 import type { UserRecord } from '../storage/jsonStore.js'
 
 export interface SkillContext {
-  chatId: number
+  chatId: string
   user: UserRecord
   text: string
   now: Date

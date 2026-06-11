@@ -57,17 +57,25 @@ cron.schedule('* * * * *', async () => {
     const now = new Date()
     const due = await findDueReminders(now)
     for (const { chatId, reminder } of due) {
-      // Push reminder via the first channel (TG today). When users have multi-channel
-      // preference, this'll lookup their preferred channel from their user record.
-      for (const ch of channels) {
-        try {
-          await ch.sendDirect(String(chatId), `🔔 提醒:\n${reminder.text}`)
-          await markReminderFired(chatId, reminder.id)
-          console.log(`[fire] user=${chatId} via=${ch.id} reminder=${reminder.id}`)
-          break
-        } catch (e) {
-          console.error(`[fire error] user=${chatId} via=${ch.id}`, e)
-        }
+      // chatId is "<channel>:<userId>" composite. Route to the matching channel adapter.
+      const colonIdx = chatId.indexOf(':')
+      if (colonIdx < 0) {
+        console.warn(`[fire skip] chatId without channel prefix: ${chatId}`)
+        continue
+      }
+      const channelId = chatId.slice(0, colonIdx)
+      const userId = chatId.slice(colonIdx + 1)
+      const ch = channels.find(c => c.id === channelId)
+      if (!ch) {
+        console.warn(`[fire skip] channel not available: ${channelId}`)
+        continue
+      }
+      try {
+        await ch.sendDirect(userId, `🔔 提醒:\n${reminder.text}`)
+        await markReminderFired(chatId, reminder.id)
+        console.log(`[fire] user=${chatId} via=${ch.id} reminder=${reminder.id}`)
+      } catch (e) {
+        console.error(`[fire error] user=${chatId} via=${ch.id}`, e)
       }
     }
   } catch (err) {

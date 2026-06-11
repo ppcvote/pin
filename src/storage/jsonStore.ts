@@ -5,7 +5,8 @@ import { join, dirname } from 'node:path'
 const DATA_ROOT = join(process.cwd(), 'data', 'users')
 
 export interface UserRecord {
-  chatId: number
+  /** Composite key: "<channel>:<userId>" e.g. "tg:781284060" or "line:Ud8df..." */
+  chatId: string
   firstName: string
   username?: string
   onboardedAt: string
@@ -38,11 +39,14 @@ export interface Expense {
   createdAt: string
 }
 
-function userFile(chatId: number): string {
-  return join(DATA_ROOT, `${chatId}.json`)
+function userFile(chatId: string): string {
+  // Replace anything that's not safe for a filename. Colons and slashes are common in
+  // composite IDs (e.g., "tg:123" — colon is illegal on Windows filenames).
+  const safe = String(chatId).replace(/[^A-Za-z0-9_.-]/g, '_')
+  return join(DATA_ROOT, `${safe}.json`)
 }
 
-export async function loadUser(chatId: number): Promise<UserRecord | null> {
+export async function loadUser(chatId: string): Promise<UserRecord | null> {
   const file = userFile(chatId)
   if (!existsSync(file)) return null
   const raw = await readFile(file, 'utf-8')
@@ -56,7 +60,7 @@ export async function saveUser(record: UserRecord): Promise<void> {
 }
 
 export async function ensureUser(
-  chatId: number,
+  chatId: string,
   firstName: string,
   username?: string
 ): Promise<UserRecord> {

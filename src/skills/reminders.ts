@@ -87,9 +87,9 @@ const reminders: Skill = {
 export default reminders
 
 /** Find all reminders due now (or earlier) across all users and not yet fired. */
-export async function findDueReminders(now: Date): Promise<Array<{ chatId: number; reminder: Reminder }>> {
+export async function findDueReminders(now: Date): Promise<Array<{ chatId: string; reminder: Reminder }>> {
   const { iterAllUsers } = await import('../storage/jsonStore.js')
-  const due: Array<{ chatId: number; reminder: Reminder }> = []
+  const due: Array<{ chatId: string; reminder: Reminder }> = []
   for await (const user of iterAllUsers()) {
     for (const r of user.reminders) {
       if (!r.fired && new Date(r.when).getTime() <= now.getTime()) {
@@ -101,7 +101,7 @@ export async function findDueReminders(now: Date): Promise<Array<{ chatId: numbe
 }
 
 /** Mark a reminder as fired and persist. */
-export async function markReminderFired(chatId: number, reminderId: string): Promise<void> {
+export async function markReminderFired(chatId: string, reminderId: string): Promise<void> {
   const { loadUser, saveUser } = await import('../storage/jsonStore.js')
   const user = await loadUser(chatId)
   if (!user) return

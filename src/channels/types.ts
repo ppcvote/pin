@@ -21,11 +21,21 @@ export interface Button {
   url?: string
 }
 
+export interface ThemeHint {
+  /** Skill's brand color (hex) — drives header bg + primary button color */
+  primaryColor?: string
+  /** Skill's icon (emoji or short mark) for the header */
+  icon?: string
+  /** Title to show in header (e.g. skill name) */
+  title?: string
+}
+
 export interface OutboundReply {
   text: string
   buttons?: Button[][]              // inline keyboard
   parseMode?: 'markdown' | 'plain'  // optional formatting hint
   edit?: boolean                    // true → edit the previous message in place
+  theme?: ThemeHint                 // brand color / icon / title for the response
 }
 
 export type MessageHandler = (msg: InboundMessage) => Promise<OutboundReply | null>
