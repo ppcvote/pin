@@ -142,7 +142,7 @@ metadata:
           body:
             account_id: "{account_id}"
             text: "{content}"
-            publish_at: "{now}"
+            publish_at: "{now+30s}"
         respond:
           template: |
             ✅ 已排程發布

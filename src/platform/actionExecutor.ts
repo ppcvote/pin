@@ -53,9 +53,17 @@ function buildChoices(
 function resolve(str: string, args: Record<string, any>): string {
   return str
     .replace(/\{([A-Z_][A-Z0-9_]*)\}/g, (_, name) => String(process.env[name] ?? ''))
-    .replace(/\{([a-z_][a-z0-9_]*)\}/g, (_, name) => {
-      if (name === 'now') return new Date().toISOString()
-      if (name === 'today') return new Date().toISOString().slice(0, 10)
+    .replace(/\{([a-z_][a-z0-9_]*)(?:([+-])(\d+)([smhd]))?\}/g, (_, name, sign, amount, unit) => {
+      if (name === 'now' || name === 'today') {
+        let ms = Date.now()
+        if (sign && amount && unit) {
+          const n = parseInt(amount, 10)
+          const factor = unit === 's' ? 1000 : unit === 'm' ? 60_000 : unit === 'h' ? 3_600_000 : 86_400_000
+          ms += (sign === '+' ? 1 : -1) * n * factor
+        }
+        const d = new Date(ms)
+        return name === 'today' ? d.toISOString().slice(0, 10) : d.toISOString()
+      }
       return String(args[name] ?? '')
     })
 }

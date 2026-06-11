@@ -54,9 +54,25 @@ async function fetchChoiceArray(skill: Skill, fromActionId: string, overridePath
   return pathLookup(data, path) ?? pathLookup(r.raw, path) ?? []
 }
 
+/** Render a "已選" header summarising args collected so far. */
+function collectedHeader(action: ActionDef, state: WizardState): string {
+  const lines: string[] = []
+  for (let i = 0; i < state.argIdx; i++) {
+    const a = action.args[i]
+    if (!a) continue
+    const label = state.collected_labels?.[a.name] ?? state.collected[a.name] ?? ''
+    if (!label) continue
+    lines.push(`  ${a.label ?? a.name}: ${label}`)
+  }
+  if (lines.length === 0) return ''
+  return `✅ 已選:\n${lines.join('\n')}\n\n`
+}
+
 /** Build the prompt for whichever arg we're currently collecting. */
-async function promptForArg(skill: Skill, action: ActionDef, arg: ArgSpec, args: Record<string, string>): Promise<WizardOutcome> {
-  // Static enum — no API call, render arg.options directly
+async function promptForArg(skill: Skill, action: ActionDef, arg: ArgSpec, args: Record<string, string>, state: WizardState): Promise<WizardOutcome> {
+  const header = collectedHeader(action, state)
+
+  // Static enum
   if (arg.options && arg.options.length > 0) {
     const buttons: WizardButton[] = []
     for (const opt of arg.options) {
@@ -66,10 +82,10 @@ async function promptForArg(skill: Skill, action: ActionDef, arg: ArgSpec, args:
       buttons.push({ text: opt.label.slice(0, 40), callback_data: cb })
     }
     buttons.push(NAV_BTN())
-    return { kind: 'prompt_choice', text: `${arg.label ?? arg.name} (${buttons.length - 1} 選 1):`, buttons }
+    return { kind: 'prompt_choice', text: `${header}${arg.label ?? arg.name} (${buttons.length - 1} 選 1):`, buttons }
   }
 
-  // Dynamic enum — fetch via from_action + render
+  // Dynamic enum
   if (arg.from_action) {
     const arr = await fetchChoiceArray(skill, arg.from_action, arg.from_path, args)
     if (!Array.isArray(arr) || arr.length === 0) {
@@ -83,17 +99,17 @@ async function promptForArg(skill: Skill, action: ActionDef, arg: ArgSpec, args:
         ? String(item?.[arg.display_key] ?? value).slice(0, 40)
         : value.slice(0, 40)
       const cb = `wz:${arg.name}:${encodeURIComponent(value)}`
-      if (Buffer.byteLength(cb) > 64) continue  // skip too-long callbacks
+      if (Buffer.byteLength(cb) > 64) continue
       buttons.push({ text, callback_data: cb })
     }
     buttons.push(NAV_BTN())
-    return { kind: 'prompt_choice', text: `${arg.label ?? arg.name} (${buttons.length - 1} 選 1):`, buttons }
+    return { kind: 'prompt_choice', text: `${header}${arg.label ?? arg.name} (${buttons.length - 1} 選 1):`, buttons }
   }
 
-  // Text arg — ask user to type
+  // Text arg
   if (arg.input === 'text') {
     const hint = arg.placeholder ? `\n💡 例如: ${arg.placeholder}` : ''
-    return { kind: 'prompt_text', text: `📝 ${arg.label ?? arg.name}:${hint}`, buttons: [NAV_BTN()] }
+    return { kind: 'prompt_text', text: `${header}📝 ${arg.label ?? arg.name}:${hint}`, buttons: [NAV_BTN()] }
   }
 
   return { kind: 'error', text: `arg "${arg.name}" 沒有可收集的 UI 方式 (缺 from_action 或 input)` }
@@ -151,13 +167,29 @@ async function executeAndMaybePreview(user: UserRecord, skill: Skill, action: Ac
 
 /** Run the next step of the wizard (or execute if all args collected). */
 async function continueWizard(user: UserRecord, skill: Skill, action: ActionDef, state: WizardState): Promise<WizardOutcome> {
-  // If we still have args to collect, prompt the next one
   if (state.argIdx < action.args.length) {
     const arg = action.args[state.argIdx]
-    return promptForArg(skill, action, arg, state.collected)
+    return promptForArg(skill, action, arg, state.collected, state)
   }
-  // All collected → execute
   return executeAndMaybePreview(user, skill, action, state)
+}
+
+/** Look up the display label for a chosen value — same logic the prompt uses. */
+async function resolveDisplayLabel(skill: Skill, arg: ArgSpec, value: string, args: Record<string, string>): Promise<string> {
+  if (arg.options && arg.options.length > 0) {
+    const opt = arg.options.find(o => o.value === value)
+    return opt?.label ?? value
+  }
+  if (arg.from_action) {
+    const arr = await fetchChoiceArray(skill, arg.from_action, arg.from_path, args)
+    const item = arr.find((it: any) => {
+      const v = arg.select_key ? String(it?.[arg.select_key] ?? '') : String(it)
+      return v === value
+    })
+    if (!item) return value
+    return arg.display_key ? String(item?.[arg.display_key] ?? value) : String(value)
+  }
+  return value
 }
 
 // ── Public API ────────────────────────────────────────────────────────
@@ -233,11 +265,12 @@ export async function processWizardCallback(user: UserRecord, callbackData: stri
     const argName = rest.slice(0, idx)
     const value = decodeURIComponent(rest.slice(idx + 1))
     const currentArg = action.args[state.argIdx]
-    if (currentArg.name !== argName) {
-      // Stale button from a previous step — ignore
-      return null
-    }
+    if (currentArg.name !== argName) return null  // stale button
     state.collected[argName] = value
+    // Stash the human label so subsequent prompts can show "已選"
+    const label = await resolveDisplayLabel(skill, currentArg, value, state.collected)
+    if (!state.collected_labels) state.collected_labels = {}
+    state.collected_labels[argName] = label
     state.argIdx += 1
     user.wizard = state
     await saveUser(user)
@@ -272,6 +305,9 @@ export async function processWizardText(user: UserRecord, text: string): Promise
   if (!value) return { kind: 'error', text: '請輸入內容' }
 
   state.collected[currentArg.name] = value
+  // For text args, the label IS what they typed (truncated for display)
+  if (!state.collected_labels) state.collected_labels = {}
+  state.collected_labels[currentArg.name] = value.length > 40 ? value.slice(0, 37) + '...' : value
   state.argIdx += 1
   user.wizard = state
   await saveUser(user)

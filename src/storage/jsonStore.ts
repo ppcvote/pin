@@ -8,7 +8,10 @@ export interface WizardState {
   skillId: string
   actionId: string
   argIdx: number
+  /** Raw values (the actual IDs / hex / strings forwarded to the API). */
   collected: Record<string, string>
+  /** Human-readable labels for each collected arg, used to show "已選" context. */
+  collected_labels?: Record<string, string>
   /** Generated preview content (when waiting for confirm) */
   preview?: { content: any; rawText?: string }
   startedAt: string
