@@ -204,6 +204,44 @@ export async function executeAction(
     }
     return { ok: false, error: 'action has no api / script / handler' }
   } catch (err) {
-    return { ok: false, error: (err as Error).message.slice(0, 300) }
+    return { ok: false, error: sanitizeError((err as Error).message) }
   }
+}
+
+/**
+ * Normalise upstream error text for end users — strip HTML/CSS noise from
+ * Cloudflare/nginx error pages so the user sees something like
+ * "服務暫時無法回應 (502)" instead of "HTTP 502: <html><head>..." with 200
+ * characters of markup.
+ */
+function sanitizeError(raw: string): string {
+  // Match common upstream-down patterns
+  const httpMatch = raw.match(/HTTP\s+(\d{3})/)
+  if (httpMatch) {
+    const status = httpMatch[1]
+    if (status === '502' || status === '503' || status === '504') {
+      return `產品端服務暫時無法回應 (${status}). 稍候再試或從選單操作.`
+    }
+    if (status === '401' || status === '403') {
+      return `產品端拒絕了這個請求 (${status}). 連結可能過期或權限不足.`
+    }
+    if (status === '404') {
+      return `找不到對應資源 (${status})`
+    }
+    if (status === '429') {
+      return `操作太頻繁了 (${status}). 過一會兒再試.`
+    }
+    if (status === '500') {
+      return `產品端有個內部錯誤 (${status}). 已記入 log, 等他們修.`
+    }
+  }
+  // Network errors
+  if (/ECONNREFUSED|ENETUNREACH|EHOSTUNREACH/.test(raw)) return '連不上產品端 (網路問題)'
+  if (/ETIMEDOUT|Request timeout/.test(raw)) return '產品端反應太慢 (timeout)'
+  if (/EPROTO/.test(raw)) return '連線協議問題 (產品端 HTTPS 設定異常?)'
+  // Strip HTML if present
+  if (raw.includes('<html') || raw.includes('<body')) {
+    return raw.split('<')[0].trim().slice(0, 200) || '產品端回傳了非預期的內容'
+  }
+  return raw.slice(0, 300)
 }
