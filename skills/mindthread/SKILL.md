@@ -117,14 +117,15 @@ metadata:
             topic: "{topic}"
         preview:
           template: |
-            📝 預覽 (給 {{response.account_id}}, 用 `{{response.formula}}`):
+            📝 預覽 ({{args.account_id}} · {{data.contents.0.formula_used}} · {{data.contents.0.char_count}} 字):
 
             ━━━━━━━━━━━━━━━━━━━━
-            {{response.content}}
+            {{data.contents.0.text}}
             ━━━━━━━━━━━━━━━━━━━━
 
             想發出去嗎?
           confirm_action: publish_now
+          content_path: "data.contents.0.text"
 
       - id: publish_now
         label: 立即發佈

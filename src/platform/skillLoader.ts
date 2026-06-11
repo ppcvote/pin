@@ -89,7 +89,11 @@ export function loadSkill(skillDir: string): Skill {
           script: a.script,
           handler: a.handler,
           respond: a.respond,
-          preview: a.preview,
+          preview: a.preview ? {
+            template: a.preview.template,
+            confirm_action: a.preview.confirm_action,
+            content_path: a.preview.content_path,
+          } : undefined,
           gated_by: a.gated_by,
         })),
       }

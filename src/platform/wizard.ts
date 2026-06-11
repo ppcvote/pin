@@ -124,8 +124,15 @@ async function executeAndMaybePreview(user: UserRecord, skill: Skill, action: Ac
     found: undefined,
     more_count: 0,
   })
+  // Resolve content: walk content_path if provided, else fall back to a few heuristics
+  let extractedContent: any = result.raw
+  if (action.preview.content_path) {
+    extractedContent = pathLookup(result.raw, action.preview.content_path)
+  } else if (result.raw && typeof result.raw === 'object') {
+    extractedContent = (result.raw as any).content ?? result.raw
+  }
   state.preview = {
-    content: (result.raw && typeof result.raw === 'object' && 'content' in result.raw) ? (result.raw as any).content : result.raw,
+    content: extractedContent,
     rawText: previewText,
   }
   user.wizard = state

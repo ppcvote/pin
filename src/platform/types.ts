@@ -92,7 +92,13 @@ export interface ActionDef {
   handler?: string
   respond?: RespondSpec
   /** Action to invoke after user confirms a preview */
-  preview?: { template: string; confirm_action: string }
+  preview?: {
+    template: string
+    confirm_action: string
+    /** Path on the API response to the value forwarded as `content` arg to confirm_action.
+     *  e.g. "data.contents.0.text". If omitted, forwards the whole raw response (legacy). */
+    content_path?: string
+  }
   gated_by?: string[]
 }
 
