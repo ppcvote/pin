@@ -8,6 +8,7 @@ import cron from 'node-cron'
 import { bootRegistry, allSkills } from './platform/registry.js'
 import { findDueReminders, markReminderFired } from './skills/reminders.js'
 import { TelegramChannel } from './channels/telegram.js'
+import { LineChannel } from './channels/line.js'
 import { handlePinMessage } from './core/handle.js'
 import { brainName } from './brain/index.js'
 import { startWebhookServer } from './server/webhooks.js'
@@ -22,8 +23,14 @@ if (!TOKEN) {
   process.exit(1)
 }
 
-// Channels — TG today; Discord/LINE/Web later just `channels.push(...)` here
+// Channels — TG is primary; LINE adds if env configured.
 const channels: Channel[] = [new TelegramChannel(TOKEN)]
+if (process.env.LINE_CHANNEL_ACCESS_TOKEN && process.env.LINE_CHANNEL_SECRET) {
+  channels.push(new LineChannel(
+    process.env.LINE_CHANNEL_ACCESS_TOKEN,
+    process.env.LINE_CHANNEL_SECRET,
+  ))
+}
 
 process.on('uncaughtException', err => console.error('[uncaught]', err))
 process.on('unhandledRejection', err => console.error('[unhandled]', err))

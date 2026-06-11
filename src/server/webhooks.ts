@@ -3,6 +3,7 @@ import crypto from 'node:crypto'
 import { findWebhook } from '../platform/registry.js'
 import { render } from '../platform/template.js'
 import type { Channel, Button } from '../channels/types.js'
+import type { LineChannel } from '../channels/line.js'
 
 const PORT = parseInt(process.env.PIN_HTTP_PORT ?? '3000', 10)
 
@@ -71,6 +72,36 @@ export function startWebhookServer(channels: Channel[]): http.Server {
     if (req.method === 'GET' && req.url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: true, service: 'pin', version: '0.1.0' }))
+      return
+    }
+
+    // LINE inbound — POST /line/webhook
+    if (req.method === 'POST' && req.url === '/line/webhook') {
+      const lineCh = channelById.get('line') as LineChannel | undefined
+      if (!lineCh) {
+        res.writeHead(503, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'line_channel_not_configured' }))
+        return
+      }
+      const chunks: Buffer[] = []
+      let total = 0
+      for await (const chunk of req) {
+        const buf = typeof chunk === 'string' ? Buffer.from(chunk, 'utf-8') : (chunk as Buffer)
+        total += buf.length
+        if (total > 1_000_000) { res.writeHead(413); res.end(); return }
+        chunks.push(buf)
+      }
+      const bodyStr = Buffer.concat(chunks).toString('utf-8')
+      const sig = req.headers['x-line-signature'] as string | undefined
+      const result = await lineCh.handleWebhook(bodyStr, sig)
+      if (!result.ok) {
+        console.warn(`[line webhook] rejected: ${result.reason}`)
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: result.reason }))
+        return
+      }
+      res.writeHead(200)
+      res.end('OK')
       return
     }
 

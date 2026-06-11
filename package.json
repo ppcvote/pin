@@ -15,6 +15,7 @@
     "mcp:dev": "tsx src/mcp/server.ts"
   },
   "dependencies": {
+    "@line/bot-sdk": "^11.0.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "chrono-node": "^2.7.7",
     "dotenv": "^16.4.5",
