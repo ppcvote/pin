@@ -443,6 +443,14 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     user = (await loadUser(userKey)) ?? user
     const history = await recentHistory(userKey, 6)
     const decision = await agentRoute(user, text, history)
+    if (decision.kind === 'blocked') {
+      console.warn(`[shield blocked] user=${userKey} threats=${decision.threats.map(t => t.type).join(',')}`)
+      return {
+        text: `🛡️ Pin 偵測到這段話可能在繞 agent 邊界 (${decision.threats[0]?.type ?? decision.reason})\n\n從選單操作完全不受影響 👇`,
+        buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]],
+      }
+    }
+    // Block didn't call the LLM at all, so don't count it.
     void incrementStat(userKey, 'llmFallbacks')
     if (decision.kind === 'execute') {
       // Re-use the existing action call path so wizard / preview behave the same.

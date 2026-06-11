@@ -17,6 +17,7 @@
   "dependencies": {
     "@line/bot-sdk": "^11.0.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@ppcvote/prompt-shield": "^1.2.0",
     "@resvg/resvg-js": "^2.6.2",
     "chrono-node": "^2.7.7",
     "dotenv": "^16.4.5",

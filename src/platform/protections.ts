@@ -50,6 +50,14 @@ export const PROTECTIONS: Protection[] = [
     detail: 'no opt-out, missing config rejects',
     isActive: () => true,
   },
+  {
+    id: 'prompt_shield',
+    label: '@ppcvote/prompt-shield',
+    detail: 'injection / jailbreak gate before LLM (12-vector regex)',
+    // Only meaningful when Agent Mode is the path that reaches an LLM.
+    // Package is a direct dep — present whenever this protection module loads.
+    isActive: () => process.env.PIN_AGENT_MODE === 'true' || process.env.PIN_AGENT_MODE === '1',
+  },
 ]
 
 /** Snapshot the protections that are currently active. */

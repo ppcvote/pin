@@ -14,13 +14,18 @@
 import { generate } from './index.js'
 import { compileToolsForUser, type CompiledTool } from './toolCompiler.js'
 import { renderHistoryForLLM, type HistoryEntry } from './memory.js'
+import { createShield } from '@ppcvote/prompt-shield'
 import type { UserRecord } from '../storage/jsonStore.js'
+
+// One shield per process — pure regex inside, no per-call state we'd want to reset.
+const shield = createShield()
 
 export type AgentDecision =
   | { kind: 'execute'; tool: CompiledTool; args: Record<string, any> }
   | { kind: 'clarify'; candidates: CompiledTool[]; question: string }
   | { kind: 'none'; reply: string }
   | { kind: 'fallback'; reason: string }
+  | { kind: 'blocked'; reason: string; threats: Array<{ type: string; severity: string }> }
 
 const LLM_TIMEOUT_MS = 5000
 
@@ -80,6 +85,19 @@ function parseLlmJson(raw: string): any | null {
 }
 
 export async function agentRoute(user: UserRecord, userText: string, history: HistoryEntry[]): Promise<AgentDecision> {
+  // Injection / jailbreak gate — runs before the LLM call, short-circuits if blocked.
+  // Skill paths (button + template) bypass this gate entirely; only the freeform
+  // text path that hits the LLM has the exposure that needs it (PIN_AGENT_MODE §2.1).
+  const shieldResult = shield.check(userText)
+  if (shieldResult.blocked) {
+    console.warn(`[shield] blocked: risk=${shieldResult.risk} threats=${shieldResult.threats.map(t => t.type).join(',')}`)
+    return {
+      kind: 'blocked',
+      reason: shieldResult.risk,
+      threats: shieldResult.threats.map(t => ({ type: t.type, severity: t.severity })),
+    }
+  }
+
   const tools = compileToolsForUser(user)
   if (tools.length === 0) {
     return { kind: 'fallback', reason: 'no_tools_for_user' }
