@@ -22,14 +22,10 @@ export async function generate(prompt: string, opts?: { temperature?: number; ma
       temperature: opts?.temperature ?? 0.2,
       maxOutputTokens: opts?.max ?? 512,
       responseMimeType: 'application/json',
-      responseSchema: {
-        type: 'object',
-        properties: {
-          intent: { type: 'string', nullable: true },
-          rewritten: { type: 'string', nullable: true },
-          reply: { type: 'string', nullable: true },
-        },
-      },
+      // No responseSchema — different callers emit different shapes (legacy
+      // router uses {intent, rewritten, reply}; agent router uses
+      // {decision, action, args, candidates, question, reply}). Pinning a
+      // schema here collapses both and broke agent mode in dogfood.
     },
   })
 

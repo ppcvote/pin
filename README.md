@@ -1,35 +1,42 @@
 # Pin
 
-> The open consumer + agent runtime for [Anthropic Agent Skills](https://agentskills.io/specification).
-> Built by [Ultra Lab](https://ultralab.tw).
+> Determinism-first consumer runtime for [Anthropic Agent Skills](https://agentskills.io/specification). Drop a `SKILL.md` and your SaaS product gains a button-driven LINE / Telegram interface. Built by [Ultra Lab](https://ultralab.tw).
 
-Pin is a channel-agnostic skill runtime + MCP server. Drop a `SKILL.md` into `skills/` and the same capability becomes instantly available to:
+[![Pin Skill Spec](https://img.shields.io/badge/Pin%20Skill-Spec-2DD4BF)](./PIN_SKILL_SPEC.md)
+[![Direction Doc](https://img.shields.io/badge/Direction-Doc-D4AF37)](./PIN_DIRECTION.md)
 
-- **End users** on Telegram, Discord, LINE, WhatsApp, Web (button menus, no typing)
-- **AI agents** (Claude Code, Cursor, Hermes, Goose) via the Model Context Protocol
-- **Other services** via inbound webhooks → push notifications back to the user
+## What this is
 
-The same `SKILL.md` works in **stock Anthropic Agent Skills tools** AND in Pin (which adds menu rendering, action execution, webhook routing on top — see [`PIN_SKILL_SPEC.md`](./PIN_SKILL_SPEC.md)).
+Pin is a runtime that consumes Anthropic's Agent Skills standard — but optimized for an audience the spec wasn't originally tuned for: **end users on messaging apps in Taiwan and Hong Kong** (LINE-first, then Telegram). Drop a `SKILL.md` into `skills/` and:
 
-## Why
+- **End users** see button menus on LINE / TG — no typing, no LLM routing, no hallucination risk.
+- **AI agents** (Claude Code, Cursor, Hermes) see the same skill as MCP tools.
+- **Product backends** push event notifications back to the user's channel via signed webhooks.
+- **The skill author** writes one file and gets all four surfaces for free.
 
-Most chatbot platforms force users into their app and lock skills to their stack. The 2025 AAIF (Anthropic + OpenAI + Block, Linux Foundation) already standardized the skill format — but no one shipped a **consumer-grade runtime** for it.
+The thesis (`PIN_DIRECTION.md`): determinism beats LLM-routing for consumer SaaS UX. Buttons + templates are the main dish; LLM is a fallback, hidden behind an opt-in flag.
 
-Pin is that runtime. Optimized for: **predictable menus over LLM guessing, multi-channel by default, drop-in product integrations**.
+## What you can do with it today
 
-## Status
+Three skills ship live:
 
-Alpha. Dogfooded daily by Min Yi (founder, Ultra Lab) across his portfolio: MindThread (700+ Threads accounts), UD House (HK realtor platform), more landing.
+| Skill | Status | Wires |
+|---|---|---|
+| 🧵 **MindThread** | 6 actions, full post wizard (account → formula → topic → preview → ✅ → live Threads post) | https://mindthread.tw |
+| 🏠 **UD House** | 7 actions incl. photo-to-listing draft, list + drill leads, AI promo generation | https://social.8338.hk |
+| 📈 **UltraGrowth** | 4 actions: monthly summary, recent posts, plan info, lead/report webhooks | mock @ http://localhost:4001 (see `scripts/mock-ug-server.mjs`) |
 
-## Architecture
+Plus runtime capabilities:
 
-```
-                        ┌──────────────────────┐
-            humans  ──→ │ TG / Discord / LINE  │ ─→
-            agents  ──→ │ MCP server (stdio)   │ ─→
-            services──→ │ Webhook server :3000 │ ─→  Pin Core ── ─→ Skills/*/SKILL.md
-                        └──────────────────────┘
-```
+- **`/menu`** root → tap a skill → tap an action → done.
+- **`/card`** — your agent card with skills (weapons), runtime protections (armor), weekly counters (battle record). Spec: `PIN_AGENT_CARD.md`.
+- **`/card` 🖼️ 產生分享圖** — 1080×1350 PNG share card. Resvg-based, no Puppeteer. CJK font ships in `assets/fonts/`. Spec: `PIN_AGENT_CARD.md` §2.
+- **`/stats`** — per-week button operations, pushes, LLM usage, plus agent-mode decision distribution (execute / clarify / none / blocked / fallback) and 降級率.
+- **Webhook push closed loop** — product POSTs `lead.created` → Pin renders → LINE Flex notification with action buttons. Signature mandatory. Failed pushes dead-letter into `data/users/<...>.json#failed_pushes`. Spec: `PIN_DIRECTION.md` §P1 + `WEBHOOK_SPEC_FOR_PRODUCTS.md`.
+- **Bind/token deep link** — product backend mints a token via `POST /bind/token`, embeds in `https://line.me/R/oaMessage/@<oa>/?bind%20<token>`. User taps once. Pin binds + replies with skill menu. Spec: `PIN_ONBOARDING.md` §A + `PRODUCT_INTEGRATION.md`.
+- **Photo-driven wizards** — user sends a photo to LINE → Pin forwards to product (e.g., UD House `POST /listings/from-photo`) → renders draft → ✅ → committed. Image refs flow as `tmp:<id>` references (data lives in scratch dir, not jsonStore).
+- **Agent Mode (opt-in)** — `PIN_AGENT_MODE=true` flips freeform text routing from regex to LLM. LLM picks one registered action + args; deterministic pipeline executes. Three decisions: `execute`, `clarify` (≥2 plausible options → buttons), `none` (chat). Injection scanned by `@ppcvote/prompt-shield` before the LLM is called. `POST/PUT/DELETE` actions get forced preview even if SKILL.md didn't declare one. Spec: `PIN_AGENT_MODE.md`.
+- **MCP server** — `npm run mcp` exposes every action as an MCP tool. Drop into Claude Code's `claude_desktop_config.json` and ask "list my recent UD House leads".
 
 ## Quick start
 
@@ -37,46 +44,72 @@ Alpha. Dogfooded daily by Min Yi (founder, Ultra Lab) across his portfolio: Mind
 git clone https://github.com/ppcvote/pin.git
 cd pin
 npm install
-cp .env.example .env  # fill in TELEGRAM_BOT_TOKEN + skill secrets
+cp .env.example .env  # fill in TELEGRAM_BOT_TOKEN + LINE_* + skill secrets
 npm run build
-
-# As a Telegram bot (channel mode)
 npm start
 
-# As an MCP server (agent mode — for Claude Code / Cursor)
-npm run mcp
+# In another shell, for the UltraGrowth dogfood pre-UltraLab:
+node scripts/mock-ug-server.mjs
 ```
 
-## Project structure
+For LINE you'll also need a public HTTPS endpoint for inbound + image delivery. `cloudflared tunnel --url http://localhost:3000` is what we dogfood on. Set `PIN_PUBLIC_URL` in `.env` to the public tunnel URL.
+
+## Governance docs
+
+Pin is governed by a small stack of authored spec docs. The order of authority:
+
+1. [PIN_DIRECTION.md](./PIN_DIRECTION.md) — strategic constitution. P0–P3 priority, NOT-DO list, 3-month checkpoint.
+2. [PIN_SKILL_SPEC.md](./PIN_SKILL_SPEC.md) — `metadata.pin` extension on top of Anthropic Agent Skills.
+3. [PIN_ONBOARDING.md](./PIN_ONBOARDING.md) — how users connect; Phase A bind/token, Phase B landing, Phase C 探索.
+4. [PIN_AGENT_CARD.md](./PIN_AGENT_CARD.md) — the agent card visualization.
+5. [PIN_AGENT_MODE.md](./PIN_AGENT_MODE.md) — when the LLM is allowed to nominate an action.
+6. [PIN_FLYWHEEL.md](./PIN_FLYWHEEL.md) — UltraGrowth integration as the 留存 surface of the Ultra Lab flywheel.
+7. [WEBHOOK_SPEC_FOR_PRODUCTS.md](./WEBHOOK_SPEC_FOR_PRODUCTS.md) — product backend integration spec.
+8. [PRODUCT_INTEGRATION.md](./PRODUCT_INTEGRATION.md) — deep link + bind/token integration spec.
+9. [BOS_INTEGRATION.md](./BOS_INTEGRATION.md) — how Pin and UltraBOS relate.
+
+Conflicts resolve in document order, except where a document explicitly says otherwise.
+
+## Project layout
 
 ```
 src/
-├── platform/    SKILL.md spec runtime (loader, executor, menu, registry)
-├── channels/    Channel adapters (TG today, more on the way)
-├── core/        Channel-agnostic message handling
-├── server/      HTTP server for webhooks
-├── mcp/         Pin MCP server entry point
-├── brain/       Optional Gemini / Ollama LLM router (for freeform fallback)
-└── bot.ts       Main entry — wires everything together
+├── platform/        SKILL.md spec runtime (loader, executor, menu, registry, template, wizard, binding)
+├── channels/        Channel adapters (TG, LINE today; same Channel interface)
+├── core/            Channel-agnostic message handling
+├── server/          HTTP server for webhooks + image delivery + /bind/token
+├── mcp/             Pin MCP server entry point
+├── brain/           Gemini / Ollama LLM router + tool compiler + agent mode + shield mount
+├── runtime/         Cross-cutting runtime services (deliver, stats, tempStore, flywheelReporter, cardRenderer)
+├── storage/         jsonStore + bindTokens
+└── bot.ts           Entry — wires channels + HTTP + cron
 
 skills/
-├── mindthread/SKILL.md   Threads automation product
-└── udhouse/SKILL.md      HK real-estate product
+├── mindthread/SKILL.md
+├── udhouse/SKILL.md
+└── ultragrowth/SKILL.md
+
+scripts/
+└── mock-ug-server.mjs   Dev mock for UltraGrowth API (FLYWHEEL §1 contract)
+
+assets/fonts/NotoSansTC-Regular.otf   For resvg PNG card rendering
+
+proposals/
+└── menu-driven-consumer-execution.md  Draft for agentskills/agentskills discussion
 ```
 
 ## Adding a new product to Pin
 
-1. Create `skills/<your-product>/SKILL.md`
-2. Declare actions under `metadata.pin.actions` (HTTP endpoints, args, response templates)
-3. (Optional) Declare `metadata.pin.webhooks` for push notifications
-4. Restart Pin
+1. Create `skills/<your-product>/SKILL.md` with frontmatter (`name`, `description`, `metadata.pin.{icon, primary_color, actions, webhooks}`).
+2. Each action declares its `api:` call, args, and `respond.template` (Handlebars-ish). Agent Skills standard `body` prose stays in the markdown body — works in Claude Code or any standard-aware tool unchanged.
+3. Restart Pin.
 
-The skill instantly appears in `/menu`, becomes an MCP tool, and can receive webhooks. Full spec: [`PIN_SKILL_SPEC.md`](./PIN_SKILL_SPEC.md).
+The action shows up in `/menu`, becomes an MCP tool, gets exposed to Agent Mode (when on), and can receive webhooks. Full spec: [PIN_SKILL_SPEC.md](./PIN_SKILL_SPEC.md).
 
 ## License
 
-Source-available, Pin-Personal license — free for personal use, contact for commercial.
+Source-available, Pin-Personal license — free for personal use; contact for commercial. The Pin runtime is the moat, the spec extensions are gifts back to the community (see [proposals/](./proposals/)).
 
 ---
 
-Built with [Telegraf](https://telegraf.js.org), [Anthropic MCP SDK](https://github.com/modelcontextprotocol/typescript-sdk), and a lot of late nights.
+Built with [Telegraf](https://telegraf.js.org), [`@line/bot-sdk`](https://github.com/line/line-bot-sdk-nodejs), [Anthropic MCP SDK](https://github.com/modelcontextprotocol/typescript-sdk), [resvg-js](https://github.com/yisibl/resvg-js), [`@ppcvote/prompt-shield`](https://npmjs.com/@ppcvote/prompt-shield), and a lot of late nights.
