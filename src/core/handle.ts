@@ -620,9 +620,15 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
                buttons: [[{ text: `⬅️ ${skill.name}`, callback_data: `s:${skill.id}` }, { text: '🏠 主選單', callback_data: 'm:root' }]] }
     }
     if (decision.kind === 'clarify') {
-      const candidateButtons: Button[][] = decision.candidates.map(c => [
-        { text: c.description.split(' — ')[1] || c.name, callback_data: `a:${c.skillId}:${c.actionId}` }
-      ])
+      // Render candidate buttons with friendly action labels (with skill icon)
+      // instead of raw tool names like "mindthread__post". The compiled tool's
+      // description carries "<skill icon> <skill name>: <action label> — <desc>".
+      const candidateButtons: Button[][] = decision.candidates.map(c => {
+        const found = findAction(c.skillId, c.actionId)
+        const icon = found?.skill?.pin?.icon ?? '•'
+        const label = found?.action?.label ?? c.actionId
+        return [{ text: `${icon} ${label}`, callback_data: `a:${c.skillId}:${c.actionId}` }]
+      })
       candidateButtons.push([{ text: '🏠 主選單', callback_data: 'm:root' }])
       await appendHistory(userKey, 'assistant', decision.question, msg.userDisplayName, msg.userHandle)
       return { text: `${decision.question}\n\n🧠×1`, buttons: candidateButtons }
