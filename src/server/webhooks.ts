@@ -19,7 +19,7 @@ function parseUserKey(pinUserId: string): { channelId: string; userId: string } 
   return { channelId: pinUserId.slice(0, idx), userId: pinUserId.slice(idx + 1) }
 }
 
-function verifySignature(secretEnvName: string | undefined, body: string, headerSig: string | undefined): boolean {
+function verifySignature(secretEnvName: string | undefined, bodyBuf: Buffer, headerSig: string | undefined): boolean {
   if (!secretEnvName) return true  // no secret required → accept (dev mode)
   const secret = process.env[secretEnvName]
   if (!secret) {
@@ -30,10 +30,10 @@ function verifySignature(secretEnvName: string | undefined, body: string, header
     console.warn(`[webhook] missing X-Pin-Signature header`)
     return false
   }
-  const expected = crypto.createHmac('sha256', secret).update(body).digest('hex')
+  const expected = crypto.createHmac('sha256', secret).update(bodyBuf).digest('hex')
   const provided = headerSig.replace(/^sha256=/, '')
   if (expected !== provided) {
-    console.warn(`[webhook] sig mismatch: expected=${expected.slice(0,16)}... provided=${provided.slice(0,16)}... bodyLen=${body.length}`)
+    console.warn(`[webhook] sig mismatch: expected=${expected.slice(0,16)}... provided=${provided.slice(0,16)}... bytes=${bodyBuf.length}`)
     return false
   }
   return true
@@ -84,14 +84,21 @@ export function startWebhookServer(channels: Channel[]): http.Server {
 
     const [, skillId, event] = match
 
-    // Read body
-    let body = ''
-    for await (const chunk of req) body += chunk
-    if (body.length > 1_000_000) {  // 1 MB cap
-      res.writeHead(413)
-      res.end()
-      return
+    // Read body as raw bytes (avoid mid-codepoint UTF-8 corruption + preserve exact bytes for HMAC)
+    const chunks: Buffer[] = []
+    let total = 0
+    for await (const chunk of req) {
+      const buf = typeof chunk === 'string' ? Buffer.from(chunk, 'utf-8') : (chunk as Buffer)
+      total += buf.length
+      if (total > 1_000_000) {  // 1 MB cap
+        res.writeHead(413)
+        res.end()
+        return
+      }
+      chunks.push(buf)
     }
+    const bodyBuf = Buffer.concat(chunks)
+    const body = bodyBuf.toString('utf-8')
 
     // Lookup webhook spec
     const found = findWebhook(skillId, event)
@@ -102,9 +109,9 @@ export function startWebhookServer(channels: Channel[]): http.Server {
     }
     const { skill, webhook } = found
 
-    // Verify signature
+    // Verify signature (over raw bytes, not the decoded string)
     const sig = req.headers['x-pin-signature'] as string | undefined
-    if (!verifySignature(webhook.secret, body, sig)) {
+    if (!verifySignature(webhook.secret, bodyBuf, sig)) {
       console.warn(`[webhook] bad sig: skill=${skillId} event=${event}`)
       res.writeHead(401, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ error: 'bad_signature' }))
