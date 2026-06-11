@@ -6,17 +6,29 @@ export interface InlineButton {
   callback_data: string
 }
 
-/** Top-level menu — one row per skill, plus the agent card entry up top. */
-export function rootMenu(): { title: string; buttons: InlineButton[][] } {
+/** Top-level menu — agent card up top + bound skills + 🧭 探索 (un-bound). */
+export function rootMenu(boundSkillIds: string[] = []): { title: string; buttons: InlineButton[][] } {
   const skills = allSkills()
+  const bound = new Set(boundSkillIds)
   const buttons: InlineButton[][] = []
-  // System-injected: agent card
   buttons.push([{ text: '🃏 看我的 Agent', callback_data: 'card' }])
-  for (const s of skills) {
+
+  // Bound (or, if nothing is bound yet, show all so dogfood users aren't stranded)
+  const showAll = bound.size === 0
+  const myskills = showAll ? skills : skills.filter(s => bound.has(s.id))
+  for (const s of myskills) {
     const icon = s.pin?.icon ?? '•'
-    const label = `${icon} ${s.name}`
-    buttons.push([{ text: label, callback_data: `s:${s.id}` }])
+    buttons.push([{ text: `${icon} ${s.name}`, callback_data: `s:${s.id}` }])
   }
+
+  // 🧭 探索 — show only when there are un-bound skills to surface
+  if (!showAll) {
+    const explore = skills.filter(s => !bound.has(s.id))
+    if (explore.length > 0) {
+      buttons.push([{ text: '🧭 探索 (還沒連接)', callback_data: 'explore' }])
+    }
+  }
+
   return { title: '選一個吧 👇', buttons }
 }
 

@@ -130,6 +130,8 @@ export interface PinExtension {
   secrets?: string[]
   actions: ActionDef[]
   webhooks?: WebhookSpec[]
+  /** Per PIN_ONBOARDING §C — link to product's connect page for the 探索 section. */
+  connect_url?: string
 }
 
 export interface Skill {

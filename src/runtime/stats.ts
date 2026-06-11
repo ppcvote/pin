@@ -79,6 +79,37 @@ export async function getCurrentWeekStats(userKey: string): Promise<WeeklyStats>
  * Used to render "活躍 / 待命" on each skill in the weapons slot.
  * (This is a coarse signal — any action on any skill counts as activity.)
  */
+export type AgentDecisionKind = 'execute' | 'clarify' | 'none' | 'blocked' | 'fallback'
+
+export async function incrementAgentStat(userKey: string, kind: AgentDecisionKind): Promise<void> {
+  if (!userKey) return
+  try {
+    const user = (await loadUser(userKey)) ?? await ensureUser(userKey, '', undefined)
+    const week = isoWeek()
+    if (!user.agentStats) user.agentStats = {}
+    if (!user.agentStats[week]) user.agentStats[week] = { execute: 0, clarify: 0, none: 0, blocked: 0, fallback: 0 }
+    user.agentStats[week][kind] = (user.agentStats[week][kind] ?? 0) + 1
+    const keys = Object.keys(user.agentStats).sort()
+    if (keys.length > MAX_WEEKS_KEPT) {
+      const keep = keys.slice(-MAX_WEEKS_KEPT)
+      const out: typeof user.agentStats = {}
+      for (const k of keep) out[k] = user.agentStats[k]
+      user.agentStats = out
+    }
+    await saveUser(user)
+  } catch (err) {
+    console.error('[agentStats] increment failed', err)
+  }
+}
+
+export async function getCurrentWeekAgentStats(userKey: string): Promise<{ execute: number; clarify: number; none: number; blocked: number; fallback: number }> {
+  const empty = { execute: 0, clarify: 0, none: 0, blocked: 0, fallback: 0 }
+  if (!userKey) return empty
+  const user = await loadUser(userKey)
+  if (!user) return empty
+  return user.agentStats?.[isoWeek()] ?? empty
+}
+
 export async function userActiveWithinDays(userKey: string, days = 7): Promise<boolean> {
   const user = await loadUser(userKey)
   if (!user) return false

@@ -63,6 +63,7 @@ export function loadSkill(skillDir: string): Skill {
         icon: fm.metadata.pin.icon,
         primary_color: fm.metadata.pin.primary_color,
         secrets: fm.metadata.pin.secrets ?? [],
+        connect_url: fm.metadata.pin.connect_url,
         webhooks: (fm.metadata.pin.webhooks ?? []).map((w: any) => ({
           event: w.event,
           secret: w.secret,

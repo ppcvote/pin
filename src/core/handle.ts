@@ -7,7 +7,7 @@ import { executeAction } from '../platform/actionExecutor.js'
 import { startWizard, processWizardCallback, processWizardText, processWizardImage, type WizardOutcome } from '../platform/wizard.js'
 import { createBindingToken } from '../platform/binding.js'
 import { buildAgentCardData, renderAgentCardText } from '../platform/agentCard.js'
-import { incrementStat } from '../runtime/stats.js'
+import { incrementStat, incrementAgentStat } from '../runtime/stats.js'
 import { redeemBindToken } from '../storage/bindTokens.js'
 import { saveUser } from '../storage/jsonStore.js'
 import { agentRoute, isAgentModeEnabled } from '../brain/agentRouter.js'
@@ -136,8 +136,34 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     const parsed = parseCallback(data)
 
     if (parsed.kind === 'root') {
-      const { title, buttons } = rootMenu()
+      const boundIds = Object.keys(user.bindings ?? {})
+      const { title, buttons } = rootMenu(boundIds)
       return { text: title, buttons, edit: true, theme: { title: 'Pin' } }
+    }
+    if (data === 'explore') {
+      const boundIds = new Set(Object.keys(user.bindings ?? {}))
+      const unbound = allSkills().filter(s => !boundIds.has(s.id))
+      if (unbound.length === 0) {
+        return { text: '所有 skill 都已連接 🎉', buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
+      }
+      const buttons: Button[][] = []
+      for (const s of unbound) {
+        const icon = s.pin?.icon ?? '•'
+        const desc = (s.description ?? '').split('\n')[0].slice(0, 60)
+        // If skill declares connect_url, expose an outbound link straight to it
+        if (s.pin?.connect_url) {
+          buttons.push([{ text: `${icon} ${s.name}`, url: s.pin.connect_url }])
+        } else {
+          buttons.push([{ text: `${icon} ${s.name} — 從產品端綁定`, callback_data: `s:${s.id}` }])
+        }
+      }
+      buttons.push([{ text: '🏠 主選單', callback_data: 'm:root' }])
+      const lines = unbound.map(s => `${s.pin?.icon ?? '•'} ${s.name} — ${(s.description ?? '').split('\n')[0].slice(0, 60)}`)
+      return {
+        text: `🧭 探索\n\n你還沒連接這些 skills:\n\n${lines.join('\n')}\n\n從產品後台點「📱 用 LINE 管理」就能一鍵連接。`,
+        buttons,
+        edit: true,
+      }
     }
     if (parsed.kind === 'skill') {
       const view = skillMenu(parsed.skillId)
@@ -416,7 +442,8 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     return welcomeScreen(msg.userDisplayName)
   }
   if (text === '/menu') {
-    const { title, buttons } = rootMenu()
+    const boundIds = Object.keys(user.bindings ?? {})
+    const { title, buttons } = rootMenu(boundIds)
     return { text: title, buttons }
   }
   if (text === '/card') {
@@ -445,6 +472,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     const decision = await agentRoute(user, text, history)
     if (decision.kind === 'blocked') {
       console.warn(`[shield blocked] user=${userKey} threats=${decision.threats.map(t => t.type).join(',')}`)
+      void incrementAgentStat(userKey, 'blocked')
       return {
         text: `🛡️ Pin 偵測到這段話可能在繞 agent 邊界 (${decision.threats[0]?.type ?? decision.reason})\n\n從選單操作完全不受影響 👇`,
         buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]],
@@ -452,6 +480,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     }
     // Block didn't call the LLM at all, so don't count it.
     void incrementStat(userKey, 'llmFallbacks')
+    void incrementAgentStat(userKey, decision.kind)
     if (decision.kind === 'execute') {
       // Re-use the existing action call path so wizard / preview behave the same.
       const found = findAction(decision.tool.skillId, decision.tool.actionId)
@@ -525,7 +554,9 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
                buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
     }
     // fallback — show menu
-    const root = rootMenu()
+    const boundIds = Object.keys(user.bindings ?? {})
+    const root = rootMenu(boundIds)
+    void incrementAgentStat(userKey, 'fallback')
     return { text: `(我這邊路由曖昧, 給你選單 — ${decision.reason})`, buttons: root.buttons }
   }
 
