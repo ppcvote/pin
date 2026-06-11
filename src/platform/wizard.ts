@@ -41,13 +41,14 @@ function pathLookup(obj: any, path: string): any {
   return cur
 }
 
-/** Pull the array referenced by a from_action arg, so we can render choice buttons. */
-async function fetchChoiceArray(skill: Skill, fromActionId: string, args: Record<string, string>): Promise<any[]> {
+/** Pull the array referenced by a from_action arg, so we can render choice buttons.
+ *  Path resolution order: arg.from_path → source action's respond.choices.from → top-level. */
+async function fetchChoiceArray(skill: Skill, fromActionId: string, overridePath: string | undefined, args: Record<string, string>): Promise<any[]> {
   const sourceAction = skill.pin?.actions.find(a => a.id === fromActionId)
   if (!sourceAction) return []
   const r = await executeAction(skill, sourceAction, args)
   if (!r.ok) return []
-  const path = sourceAction.respond?.choices?.from
+  const path = overridePath ?? sourceAction.respond?.choices?.from
   const data = (r.raw && typeof r.raw === 'object' && 'data' in r.raw) ? r.raw.data : r.raw
   if (!path) return Array.isArray(data) ? data : []
   return pathLookup(data, path) ?? pathLookup(r.raw, path) ?? []
@@ -57,7 +58,7 @@ async function fetchChoiceArray(skill: Skill, fromActionId: string, args: Record
 async function promptForArg(skill: Skill, action: ActionDef, arg: ArgSpec, args: Record<string, string>): Promise<WizardOutcome> {
   // Choice arg — fetch options + render buttons
   if (arg.from_action) {
-    const arr = await fetchChoiceArray(skill, arg.from_action, args)
+    const arr = await fetchChoiceArray(skill, arg.from_action, arg.from_path, args)
     if (!Array.isArray(arr) || arr.length === 0) {
       return { kind: 'error', text: `沒找到「${arg.label ?? arg.name}」可選的選項` }
     }

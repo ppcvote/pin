@@ -5,6 +5,9 @@ export interface ArgSpec {
   label: string
   type?: 'string' | 'number' | 'enum'
   from_action?: string
+  /** Path to the array on the from_action response (e.g. "formulas" or "data.accounts").
+   *  Falls back to the source action's respond.choices.from when omitted. */
+  from_path?: string
   select_key?: string
   display_key?: string
   input?: 'text'

@@ -90,6 +90,7 @@ metadata:
             label: 選文案公式
             type: string
             from_action: list_formulas
+            from_path: formulas
             select_key: id
             display_key: description
           - name: topic
