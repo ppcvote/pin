@@ -208,7 +208,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       user.agent_pending = undefined
       await saveUser(user)
       const result = await executeAction(skill, action, pending.args)
-      void incrementStat(userKey, 'actions')
+      await incrementStat(userKey, 'actions')
       const replyText = result.ok
         ? (result.rendered ?? '✅ 完成')
         : `${action.label} 失敗: ${result.error}`
@@ -370,7 +370,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
 
       const result = await executeAction(skill, action, parsed.args)
       // Count button-driven actions only (wizard ones get counted when finalized)
-      void incrementStat(userKey, 'actions')
+      await incrementStat(userKey, 'actions')
       const text = result.ok
         ? (result.rendered ?? JSON.stringify(result.raw).slice(0, 1000))
         : `${action.label} 失敗 😢\n${result.error}`
@@ -533,15 +533,15 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     const decision = await agentRoute(user, text, history)
     if (decision.kind === 'blocked') {
       console.warn(`[shield blocked] user=${userKey} threats=${decision.threats.map(t => t.type).join(',')}`)
-      void incrementAgentStat(userKey, 'blocked')
+      await incrementAgentStat(userKey, 'blocked')
       return {
         text: `🛡️ Pin 偵測到這段話可能在繞 agent 邊界 (${decision.threats[0]?.type ?? decision.reason})\n\n從選單操作完全不受影響 👇`,
         buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]],
       }
     }
     // Block didn't call the LLM at all, so don't count it.
-    void incrementStat(userKey, 'llmFallbacks')
-    void incrementAgentStat(userKey, decision.kind)
+    await incrementStat(userKey, 'llmFallbacks')
+    await incrementAgentStat(userKey, decision.kind)
     if (decision.kind === 'execute') {
       // Re-use the existing action call path so wizard / preview behave the same.
       const found = findAction(decision.tool.skillId, decision.tool.actionId)
@@ -592,7 +592,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
         return { ...reply, text: `${reply.text}\n\n🧠×1` }
       }
       const result = await executeAction(skill, action, decision.args ?? {})
-      void incrementStat(userKey, 'actions')
+      await incrementStat(userKey, 'actions')
       const replyText = result.ok
         ? (result.rendered ?? '✅ 完成')
         : `${action.label} 失敗: ${result.error}`
@@ -617,7 +617,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     // fallback — show menu
     const boundIds = Object.keys(user.bindings ?? {})
     const root = rootMenu(boundIds)
-    void incrementAgentStat(userKey, 'fallback')
+    await incrementAgentStat(userKey, 'fallback')
     return { text: `(我這邊路由曖昧, 給你選單 — ${decision.reason})`, buttons: root.buttons }
   }
 
@@ -626,7 +626,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
   const result = await legacyRoute({ chatId: userKey, user, text, now: new Date() })
   await appendHistory(userKey, 'assistant', result.reply, msg.userDisplayName, msg.userHandle)
   if (result.via === 'llm' || result.via === 'fallback') {
-    void incrementStat(userKey, 'llmFallbacks')
+    await incrementStat(userKey, 'llmFallbacks')
   }
   console.log(`[route] user=${userKey} via=${result.via} skill=${result.skill?.id ?? 'none'} text="${text.slice(0, 60)}"`)
   return { text: result.reply }

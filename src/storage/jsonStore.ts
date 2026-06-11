@@ -113,13 +113,27 @@ export async function saveUser(record: UserRecord): Promise<void> {
   const file = userFile(record.chatId)
   await mkdir(dirname(file), { recursive: true })
   // Atomic write — write to a per-process/per-call temp file, then rename.
-  // Two concurrent turns on the same user would otherwise produce a
-  // "JSON appended after JSON" file (caught in the autonomous dogfood
-  // drill on 2026-06-12 when agent-mode + cron + handler all wrote
-  // user state at once).
+  // Windows rename can EPERM when another handle (read or write) is open on
+  // the destination; retry briefly with backoff. POSIX renames are atomic
+  // and don't hit this. If retries exhaust, fall back to a plain in-place
+  // write — better to risk a tiny corruption window than to drop user
+  // state entirely.
   const tmp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 6)}.tmp`
   await writeFile(tmp, JSON.stringify(record, null, 2), 'utf-8')
-  await rename(tmp, file)
+  let lastErr: any = null
+  for (const delay of [0, 25, 75, 200, 500]) {
+    if (delay) await new Promise(r => setTimeout(r, delay))
+    try {
+      await rename(tmp, file)
+      return
+    } catch (err: any) {
+      lastErr = err
+      if (err?.code !== 'EPERM' && err?.code !== 'EBUSY') break
+    }
+  }
+  // Last resort: in-place overwrite. Tmp file is left for sweep on next call.
+  console.warn(`[jsonStore] rename failed after retries (${lastErr?.code}); falling back to in-place write`)
+  await writeFile(file, JSON.stringify(record, null, 2), 'utf-8')
 }
 
 export async function ensureUser(
