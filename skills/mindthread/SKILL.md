@@ -141,12 +141,14 @@ metadata:
           auth: bearer:MT_API_KEY
           body:
             account_id: "{account_id}"
-            content: "{content}"
-            publish_at: "now"
+            text: "{content}"
+            publish_at: "{now}"
         respond:
           template: |
-            ✅ 已發到 Threads
-            {{#if response.post_id}}🔗 post id: {{response.post_id}}{{/if}}
+            ✅ 已排程發布
+            🆔 schedule id: {{data.id}}
+            🕐 publish_at: {{data.publish_at}}
+            (server cron 會在數秒內 pickup 發送)
 
       - id: totals
         label: 看總和

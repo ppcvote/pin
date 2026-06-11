@@ -49,10 +49,15 @@ function buildChoices(
   return out
 }
 
-/** Resolve `{ENV_VAR}` and `{arg_name}` placeholders in a string. */
+/** Resolve `{ENV_VAR}`, `{arg_name}`, and dynamic tokens like `{now}` in a string. */
 function resolve(str: string, args: Record<string, any>): string {
-  return str.replace(/\{([A-Z_][A-Z0-9_]*)\}/g, (_, name) => String(process.env[name] ?? ''))
-            .replace(/\{([a-z_][a-z0-9_]*)\}/g, (_, name) => String(args[name] ?? ''))
+  return str
+    .replace(/\{([A-Z_][A-Z0-9_]*)\}/g, (_, name) => String(process.env[name] ?? ''))
+    .replace(/\{([a-z_][a-z0-9_]*)\}/g, (_, name) => {
+      if (name === 'now') return new Date().toISOString()
+      if (name === 'today') return new Date().toISOString().slice(0, 10)
+      return String(args[name] ?? '')
+    })
 }
 
 /** Build Authorization header from `auth` spec like "bearer:MT_API_KEY". */
