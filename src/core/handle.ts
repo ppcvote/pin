@@ -487,6 +487,24 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       theme: { title: 'Pin' },
     }
   }
+  if (text === '/version') {
+    const skills = allSkills()
+    const totalActions = skills.reduce((n, s) => n + (s.pin?.actions?.length ?? 0), 0)
+    const totalWebhooks = skills.reduce((n, s) => n + (s.pin?.webhooks?.length ?? 0), 0)
+    return {
+      text: [
+        '🃏 Pin runtime',
+        '━━━━━━━━━━━━━━━━━',
+        `Brain:       ${process.env.BRAIN_MODE ?? 'gemini'}`,
+        `Agent Mode:  ${process.env.PIN_AGENT_MODE === 'true' ? 'ON' : 'off'}`,
+        `Channels:    LINE + Telegram`,
+        `Skills:      ${skills.map(s => `${s.pin?.icon ?? '•'} ${s.id}`).join(', ')}`,
+        `  → ${totalActions} actions, ${totalWebhooks} webhooks`,
+        `Repo:        github.com/ppcvote/pin`,
+      ].join('\n'),
+      buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]],
+    }
+  }
   if (text === '/stats') {
     const { getCurrentWeekStats, getCurrentWeekAgentStats } = await import('../runtime/stats.js')
     const s = await getCurrentWeekStats(userKey)
