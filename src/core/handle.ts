@@ -118,9 +118,14 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       const outcome = await processWizardText(user, msg.text)
       if (outcome) return wizardOutcomeToReply(outcome, skill)
     }
-    // If user typed a slash command or non-wizard callback mid-wizard, fall through to normal flow.
-    // Most non-wizard callbacks (m:root, s:..., a:...) silently cancel the wizard:
-    if (msg.callback && !msg.callback.startsWith('wz:')) {
+    // If user typed a slash command (/menu, /card, /stats, /help) or a
+    // non-wizard callback mid-wizard, silently cancel the wizard and fall
+    // through to normal flow. Otherwise the wizard would re-engage on the
+    // user's next text input, which is unexpected after they explicitly
+    // navigated away.
+    const slashCommand = !!msg.text && msg.text.startsWith('/')
+    const nonWizardCallback = !!msg.callback && !msg.callback.startsWith('wz:')
+    if (slashCommand || nonWizardCallback) {
       user.wizard = undefined
       const { saveUser } = await import('../storage/jsonStore.js')
       await saveUser(user)

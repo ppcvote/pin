@@ -131,3 +131,42 @@ test('ultragrowth declares report.ready and lead.created webhooks', () => {
   const events = (ug.pin?.webhooks ?? []).map(w => w.event).sort()
   assert.deepEqual(events, ['lead.created', 'report.ready'])
 })
+
+// ── Wizard cancellation behavior (regression net for the 2026-06-12 dogfood drill) ──
+
+test('wizard cancels when user types a slash command (/menu, /card, /stats)', async () => {
+  const { handlePinMessage } = await import('../dist/core/handle.js')
+  const { loadUser } = await import('../dist/storage/jsonStore.js')
+  const uid = 'TEST_WIZARD_SLASH_CANCEL_' + Date.now()
+  // Start a wizard
+  await handlePinMessage({ channelId: 'line', userId: uid, userDisplayName: 't', callback: 'a:mindthread:post' })
+  let user = await loadUser('line:' + uid)
+  assert.ok(user?.wizard, 'wizard should be active after starting post action')
+  // Type /menu — wizard should clear
+  await handlePinMessage({ channelId: 'line', userId: uid, userDisplayName: 't', text: '/menu' })
+  user = await loadUser('line:' + uid)
+  assert.equal(user?.wizard, undefined, 'wizard should be cleared after /menu')
+})
+
+test('wizard cancels when user taps a non-wizard callback (s:..., m:root)', async () => {
+  const { handlePinMessage } = await import('../dist/core/handle.js')
+  const { loadUser } = await import('../dist/storage/jsonStore.js')
+  const uid = 'TEST_WIZARD_CB_CANCEL_' + Date.now()
+  await handlePinMessage({ channelId: 'line', userId: uid, userDisplayName: 't', callback: 'a:mindthread:post' })
+  let user = await loadUser('line:' + uid)
+  assert.ok(user?.wizard, 'wizard should be active after starting post action')
+  await handlePinMessage({ channelId: 'line', userId: uid, userDisplayName: 't', callback: 's:udhouse' })
+  user = await loadUser('line:' + uid)
+  assert.equal(user?.wizard, undefined, 'wizard should be cleared after navigating to another skill')
+})
+
+test('wizard cancels via explicit wz:cancel callback', async () => {
+  const { handlePinMessage } = await import('../dist/core/handle.js')
+  const { loadUser } = await import('../dist/storage/jsonStore.js')
+  const uid = 'TEST_WIZARD_EXPLICIT_CANCEL_' + Date.now()
+  await handlePinMessage({ channelId: 'line', userId: uid, userDisplayName: 't', callback: 'a:mindthread:post' })
+  const reply = await handlePinMessage({ channelId: 'line', userId: uid, userDisplayName: 't', callback: 'wz:cancel' })
+  const user = await loadUser('line:' + uid)
+  assert.equal(user?.wizard, undefined, 'wizard should be cleared after wz:cancel')
+  assert.ok(reply?.text.includes('已取消'), 'should reply 已取消')
+})
