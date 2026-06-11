@@ -10,6 +10,8 @@ import { buildAgentCardData, renderAgentCardText } from '../platform/agentCard.j
 import { incrementStat } from '../runtime/stats.js'
 import { redeemBindToken } from '../storage/bindTokens.js'
 import { saveUser } from '../storage/jsonStore.js'
+import { agentRoute, isAgentModeEnabled } from '../brain/agentRouter.js'
+import { recentHistory } from '../brain/memory.js'
 import type { InboundMessage, OutboundReply, Button, ThemeHint } from '../channels/types.js'
 
 const NAV_ROW = (skillId?: string): Button[] => skillId
@@ -302,12 +304,68 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     return { text: '我看不懂這個指令 — 試 /menu 或自然語言' }
   }
 
-  // Free-form text — go through legacy skill router (regex first, LLM fallback)
+  // Free-form text routing
   await appendHistory(userKey, 'user', text, msg.userDisplayName, msg.userHandle)
+
+  // PIN_AGENT_MODE — LLM picks one registered action; everything still flows
+  // through the deterministic pipeline (wizard / args / preview / confirm).
+  if (isAgentModeEnabled()) {
+    user = (await loadUser(userKey)) ?? user
+    const history = await recentHistory(userKey, 6)
+    const decision = await agentRoute(user, text, history)
+    void incrementStat(userKey, 'llmFallbacks')
+    if (decision.kind === 'execute') {
+      // Re-use the existing action call path so wizard / preview behave the same.
+      const found = findAction(decision.tool.skillId, decision.tool.actionId)
+      if (!found) {
+        return { text: 'agent picked an action that no longer exists — falling back to menu',
+                 buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
+      }
+      const { skill, action } = found
+      const missing = (action.args ?? []).filter(a => !(a.name in (decision.args ?? {})))
+      if (missing.length > 0) {
+        // Start wizard pre-seeded with what the LLM did supply
+        user = (await loadUser(userKey)) ?? user
+        const outcome = await startWizard(user, skill.id, action.id)
+        if (user.wizard) {
+          Object.assign(user.wizard.collected, decision.args ?? {})
+          await saveUser(user)
+        }
+        const reply = wizardOutcomeToReply(outcome, skill)
+        return { ...reply, text: `${reply.text}\n\n🧠×1` }
+      }
+      const result = await executeAction(skill, action, decision.args ?? {})
+      void incrementStat(userKey, 'actions')
+      const replyText = result.ok
+        ? (result.rendered ?? '✅ 完成')
+        : `${action.label} 失敗: ${result.error}`
+      const theme: ThemeHint = { primaryColor: skill.pin?.primary_color, icon: skill.pin?.icon, title: skill.name }
+      await appendHistory(userKey, 'assistant', replyText, msg.userDisplayName, msg.userHandle)
+      return { text: `${replyText}\n\n🧠×1`, theme,
+               buttons: [[{ text: `⬅️ ${skill.name}`, callback_data: `s:${skill.id}` }, { text: '🏠 主選單', callback_data: 'm:root' }]] }
+    }
+    if (decision.kind === 'clarify') {
+      const candidateButtons: Button[][] = decision.candidates.map(c => [
+        { text: c.description.split(' — ')[1] || c.name, callback_data: `a:${c.skillId}:${c.actionId}` }
+      ])
+      candidateButtons.push([{ text: '🏠 主選單', callback_data: 'm:root' }])
+      await appendHistory(userKey, 'assistant', decision.question, msg.userDisplayName, msg.userHandle)
+      return { text: `${decision.question}\n\n🧠×1`, buttons: candidateButtons }
+    }
+    if (decision.kind === 'none') {
+      await appendHistory(userKey, 'assistant', decision.reply, msg.userDisplayName, msg.userHandle)
+      return { text: `${decision.reply}\n\n或從選單操作 👇  🧠×1`,
+               buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
+    }
+    // fallback — show menu
+    const root = rootMenu()
+    return { text: `(我這邊路由曖昧, 給你選單 — ${decision.reason})`, buttons: root.buttons }
+  }
+
+  // Legacy free-form path (regex first, optional LLM fallback) — used when
+  // PIN_AGENT_MODE is off. Keeps old behaviour for users who haven't opted in.
   const result = await legacyRoute({ chatId: userKey, user, text, now: new Date() })
   await appendHistory(userKey, 'assistant', result.reply, msg.userDisplayName, msg.userHandle)
-  // LLM fallback counter — only when the route actually went through the LLM brain.
-  // The 越低越強 line on the agent card hangs on this.
   if (result.via === 'llm' || result.via === 'fallback') {
     void incrementStat(userKey, 'llmFallbacks')
   }
