@@ -12,6 +12,7 @@ import { LineChannel } from './channels/line.js'
 import { handlePinMessage } from './core/handle.js'
 import { brainName } from './brain/index.js'
 import { startWebhookServer } from './server/webhooks.js'
+import { deliverWithRetry } from './runtime/deliver.js'
 import type { Channel } from './channels/types.js'
 
 // Boot the skill registry (loads ./skills/*/SKILL.md)
@@ -70,12 +71,15 @@ cron.schedule('* * * * *', async () => {
         console.warn(`[fire skip] channel not available: ${channelId}`)
         continue
       }
-      try {
-        await ch.sendDirect(userId, `🔔 提醒:\n${reminder.text}`)
+      const delivery = await deliverWithRetry(ch, chatId, userId, `🔔 提醒:\n${reminder.text}`)
+      if (delivery.ok) {
         await markReminderFired(chatId, reminder.id)
-        console.log(`[fire] user=${chatId} via=${ch.id} reminder=${reminder.id}`)
-      } catch (e) {
-        console.error(`[fire error] user=${chatId} via=${ch.id}`, e)
+        console.log(`[fire] user=${chatId} via=${ch.id} reminder=${reminder.id} attempts=${delivery.attempts}`)
+      } else {
+        // Keep the reminder un-fired so it'll retry next cron tick — eventually
+        // the user may unblock the bot. The push itself is already dead-lettered
+        // (see deliver.ts) for the user-visible queue.
+        console.error(`[fire failed] user=${chatId} reminder=${reminder.id} after ${delivery.attempts} attempts`)
       }
     }
   } catch (err) {

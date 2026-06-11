@@ -4,6 +4,23 @@ import { join, dirname } from 'node:path'
 
 const DATA_ROOT = join(process.cwd(), 'data', 'users')
 
+export interface BindingToken {
+  /** 8-char hex token shown to the user, pasted into product backend */
+  token: string
+  /** Which skill's webhooks this token authorises */
+  skillId: string
+  createdAt: string
+  expiresAt: string
+}
+
+export interface FailedPush {
+  text: string
+  channelId: string
+  attempts: number
+  lastError: string
+  ts: string
+}
+
 export interface WizardState {
   skillId: string
   actionId: string
@@ -28,6 +45,10 @@ export interface UserRecord {
   expenses: Expense[]
   /** In-progress multi-step action */
   wizard?: WizardState
+  /** Dead-letter queue — pushes that exhausted retries (capped at last 100) */
+  failed_pushes?: FailedPush[]
+  /** Outstanding binding tokens (one per pending product link). Expires in 10 min. */
+  binding_tokens?: BindingToken[]
 }
 
 export interface Reminder {

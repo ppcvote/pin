@@ -5,6 +5,7 @@ import { findAction, findSkill, allSkills } from '../platform/registry.js'
 import { rootMenu, skillMenu, parseCallback } from '../platform/menuRenderer.js'
 import { executeAction } from '../platform/actionExecutor.js'
 import { startWizard, processWizardCallback, processWizardText, type WizardOutcome } from '../platform/wizard.js'
+import { createBindingToken } from '../platform/binding.js'
 import type { InboundMessage, OutboundReply, Button, ThemeHint } from '../channels/types.js'
 
 const NAV_ROW = (skillId?: string): Button[] => skillId
@@ -126,6 +127,50 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
         title: skill?.name,
       }
       return { text: view.title, buttons: view.buttons, edit: true, theme }
+    }
+
+    // System-injected: binding code
+    if (data.startsWith('bind:')) {
+      const skillId = data.slice(5)
+      const skill = findSkill(skillId)
+      if (!skill?.pin?.webhooks?.length) {
+        return { text: '此 skill 沒有可綁定的通知事件' }
+      }
+      try {
+        const token = await createBindingToken(userKey, skillId)
+        const eventLines = skill.pin.webhooks.map(w => `· ${w.event}`).join('\n')
+        const text = [
+          `🔔 ${skill.name} 通知綁定`,
+          '',
+          `你的綁定碼:`,
+          `\`${token}\``,
+          '',
+          `⏱ 10 分鐘內有效, 單次使用`,
+          '',
+          `做法:`,
+          `1. 到 ${skill.name} 後台`,
+          `2. 找「Pin 綁定」設定`,
+          `3. 貼上上面這串`,
+          `4. 之後這些事件會推到你 ${msg.channelId === 'line' ? 'LINE' : 'TG'}:`,
+          eventLines,
+        ].join('\n')
+        const theme: ThemeHint = {
+          primaryColor: skill.pin?.primary_color,
+          icon: skill.pin?.icon,
+          title: skill.name,
+        }
+        return {
+          text,
+          buttons: [[
+            { text: `⬅️ ${skill.name}`, callback_data: `s:${skill.id}` },
+            { text: '🏠 主選單', callback_data: 'm:root' },
+          ]],
+          theme,
+        }
+      } catch (err) {
+        console.error('[bind error]', err)
+        return { text: `綁定失敗: ${(err as Error).message}` }
+      }
     }
     if (parsed.kind === 'action') {
       const found = findAction(parsed.skillId, parsed.actionId)

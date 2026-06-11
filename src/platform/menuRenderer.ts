@@ -25,17 +25,20 @@ export function skillMenu(skillId: string): { title: string; buttons: InlineButt
 
   const primary = skill.pin.actions.filter(a => a.visibility === 'primary')
   const secondary = skill.pin.actions.filter(a => a.visibility === 'secondary')
+  const hasWebhooks = (skill.pin.webhooks?.length ?? 0) > 0
 
   const buttons: InlineButton[][] = []
-  // Primary: one button per row (full-width)
   for (const a of primary) {
     buttons.push([{ text: a.label, callback_data: `a:${skill.id}:${a.id}` }])
   }
-  // Secondary: pack 2 per row (compact)
   for (let i = 0; i < secondary.length; i += 2) {
     const row: InlineButton[] = [{ text: secondary[i].label, callback_data: `a:${skill.id}:${secondary[i].id}` }]
     if (secondary[i + 1]) row.push({ text: secondary[i + 1].label, callback_data: `a:${skill.id}:${secondary[i + 1].id}` })
     buttons.push(row)
+  }
+  // System-injected: binding code (only if the skill exposes webhooks)
+  if (hasWebhooks) {
+    buttons.push([{ text: '🔔 綁定通知', callback_data: `bind:${skill.id}` }])
   }
   buttons.push([{ text: '⬅️ 返回', callback_data: 'm:root' }])
   const icon = skill.pin.icon ?? ''

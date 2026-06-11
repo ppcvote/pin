@@ -2,6 +2,8 @@ import http from 'node:http'
 import crypto from 'node:crypto'
 import { findWebhook } from '../platform/registry.js'
 import { render } from '../platform/template.js'
+import { deliverWithRetry } from '../runtime/deliver.js'
+import { consumeBindingToken } from '../platform/binding.js'
 import type { Channel, Button } from '../channels/types.js'
 import type { LineChannel } from '../channels/line.js'
 
@@ -20,24 +22,32 @@ function parseUserKey(pinUserId: string): { channelId: string; userId: string } 
   return { channelId: pinUserId.slice(0, idx), userId: pinUserId.slice(idx + 1) }
 }
 
-function verifySignature(secretEnvName: string | undefined, bodyBuf: Buffer, headerSig: string | undefined): boolean {
-  if (!secretEnvName) return true  // no secret required → accept (dev mode)
+/**
+ * Webhook signature verification — MANDATORY per PIN_DIRECTION §P1.
+ * A skill that declares a webhook MUST also declare a `secret:` env var name,
+ * and that secret MUST be set + match the signed body. No opt-out.
+ */
+function verifySignature(secretEnvName: string | undefined, bodyBuf: Buffer, headerSig: string | undefined): { ok: boolean; reason?: string } {
+  if (!secretEnvName) {
+    console.error(`[webhook] CONFIG: webhook spec missing required "secret:" field — rejecting`)
+    return { ok: false, reason: 'webhook_secret_not_declared' }
+  }
   const secret = process.env[secretEnvName]
   if (!secret) {
-    console.warn(`[webhook] secret env var "${secretEnvName}" missing — rejecting`)
-    return false
+    console.error(`[webhook] CONFIG: env var "${secretEnvName}" not set — rejecting`)
+    return { ok: false, reason: 'webhook_secret_missing' }
   }
   if (!headerSig) {
-    console.warn(`[webhook] missing X-Pin-Signature header`)
-    return false
+    console.error(`[webhook] missing X-Pin-Signature header`)
+    return { ok: false, reason: 'missing_signature' }
   }
   const expected = crypto.createHmac('sha256', secret).update(bodyBuf).digest('hex')
   const provided = headerSig.replace(/^sha256=/, '')
   if (expected !== provided) {
-    console.warn(`[webhook] sig mismatch: expected=${expected.slice(0,16)}... provided=${provided.slice(0,16)}... bytes=${bodyBuf.length}`)
-    return false
+    console.error(`[webhook] sig mismatch: expected=${expected.slice(0,16)}... provided=${provided.slice(0,16)}... bytes=${bodyBuf.length}`)
+    return { ok: false, reason: 'bad_signature' }
   }
-  return true
+  return { ok: true }
 }
 
 function renderButtons(buttons: any[] | undefined, skillId: string, scope: any): Button[][] | undefined {
@@ -74,6 +84,40 @@ export function startWebhookServer(channels: Channel[]): http.Server {
     if (req.method === 'GET' && req.url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: true, service: 'pin', version: '0.1.0' }))
+      return
+    }
+
+    // Binding code consumption — POST /webhooks/_bind {token}
+    if (req.method === 'POST' && req.url === '/webhooks/_bind') {
+      const chunks: Buffer[] = []
+      let total = 0
+      for await (const chunk of req) {
+        const buf = typeof chunk === 'string' ? Buffer.from(chunk, 'utf-8') : (chunk as Buffer)
+        total += buf.length
+        if (total > 4096) { res.writeHead(413); res.end(); return }
+        chunks.push(buf)
+      }
+      let body: { token?: string }
+      try { body = JSON.parse(Buffer.concat(chunks).toString('utf-8')) } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'invalid_json' }))
+        return
+      }
+      if (!body.token || typeof body.token !== 'string') {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'token_required' }))
+        return
+      }
+      const result = await consumeBindingToken(body.token.trim())
+      if (!result) {
+        console.warn(`[bind] invalid or expired token: ${body.token.slice(0, 4)}...`)
+        res.writeHead(404, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'invalid_or_expired_token' }))
+        return
+      }
+      console.log(`[bind] consumed token → pin_user_id=${result.pin_user_id} skill=${result.skill_id}`)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(result))
       return
     }
 
@@ -144,10 +188,11 @@ export function startWebhookServer(channels: Channel[]): http.Server {
 
     // Verify signature (over raw bytes, not the decoded string)
     const sig = req.headers['x-pin-signature'] as string | undefined
-    if (!verifySignature(webhook.secret, bodyBuf, sig)) {
-      console.warn(`[webhook] bad sig: skill=${skillId} event=${event}`)
+    const sigResult = verifySignature(webhook.secret, bodyBuf, sig)
+    if (!sigResult.ok) {
+      console.error(`[webhook] REJECTED: skill=${skillId} event=${event} reason=${sigResult.reason}`)
       res.writeHead(401, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: 'bad_signature' }))
+      res.end(JSON.stringify({ error: sigResult.reason }))
       return
     }
 
@@ -188,15 +233,16 @@ export function startWebhookServer(channels: Channel[]): http.Server {
       return
     }
 
-    try {
-      await channel.sendDirect(userKey.userId, text, buttons)
-      console.log(`[webhook] delivered skill=${skillId} event=${event} → ${userKey.channelId}:${userKey.userId}`)
+    const composite = `${userKey.channelId}:${userKey.userId}`
+    const delivery = await deliverWithRetry(channel, composite, userKey.userId, text, buttons)
+    if (delivery.ok) {
+      console.log(`[webhook] delivered skill=${skillId} event=${event} → ${composite} (attempts=${delivery.attempts})`)
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ ok: true, delivered_to: payload.pin_user_id }))
-    } catch (err) {
-      console.error('[webhook] delivery error', err)
-      res.writeHead(502, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: 'delivery_failed' }))
+      res.end(JSON.stringify({ ok: true, delivered_to: payload.pin_user_id, attempts: delivery.attempts }))
+    } else {
+      console.error(`[webhook] dead-letter skill=${skillId} event=${event} → ${composite}: ${delivery.error}`)
+      res.writeHead(202, { 'Content-Type': 'application/json' })  // accepted but queued
+      res.end(JSON.stringify({ ok: false, queued: true, attempts: delivery.attempts, error: delivery.error }))
     }
   })
 
