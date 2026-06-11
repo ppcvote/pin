@@ -56,6 +56,56 @@ metadata:
             Tenant: {{response.tenant_id}}
             UID: {{response.uid}}
 
+      - id: create_from_photo
+        label: 📸 傳照片建物件
+        description: Send a property photo; AI analyses it, returns a listing draft, you confirm to publish.
+        args:
+          - name: image
+            label: 物件照片
+            type: image
+            input: attachment
+            placeholder: 拍一張物件主圖, 或從相簿選
+        api:
+          method: POST
+          url: "{UDH_BASE_URL}/api/v1/listings/from-photo"
+          auth: bearer:UDH_API_KEY
+          body:
+            image: "{image}"
+        preview:
+          template: |
+            ✨ AI 從照片產出的物件草稿:
+
+            🏠 類型: {{response.suggested.estimated_type}}
+            📍 區域: {{response.suggested.estimated_district}}
+            🛏 {{response.suggested.estimated_bedrooms}} 房 {{response.suggested.estimated_bathrooms}} 衛
+            📐 {{response.suggested.estimated_sqft}} sqft
+            🪟 陽台: {{response.suggested.has_balcony}}
+            🎯 信心度: {{response.suggested.confidence}}
+
+            想建立這個物件嗎?
+          confirm_action: confirm_create_from_photo
+          content_path: "response"
+
+      - id: confirm_create_from_photo
+        label: 從 photo draft 建物件
+        description: Internal — invoked by create_from_photo's preview-confirm
+        args:
+          - name: account_id
+            type: string
+          - name: content
+            type: string
+        api:
+          method: POST
+          url: "{UDH_BASE_URL}/api/v1/listings"
+          auth: bearer:UDH_API_KEY
+          body:
+            from_draft: "{content}"
+        respond:
+          template: |
+            ✅ 物件已建立
+            🆔 listing id: {{data.id}}
+            🔗 {{data.share_url}}
+
       - id: list_listings
         label: 看所有物件
         description: List property listings — tap one to see full details

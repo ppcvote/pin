@@ -1,8 +1,8 @@
 import { messagingApi, validateSignature, webhook } from '@line/bot-sdk'
-import type { Button, Channel, MessageHandler, InboundMessage, ThemeHint } from './types.js'
+import type { Button, Channel, MessageHandler, InboundMessage, InboundImage, ThemeHint } from './types.js'
 import { PIN_NEUTRAL, PIN_SIGNATURE, resolveTheme } from './design.js'
 
-const { MessagingApiClient } = messagingApi
+const { MessagingApiClient, MessagingApiBlobClient } = messagingApi
 type WebhookEvent = webhook.Event
 
 /** Identify nav buttons (back / home) so we render them subtly. */
@@ -121,11 +121,13 @@ export class LineChannel implements Channel {
   readonly id = 'line'
   readonly name = 'LINE'
   private client: InstanceType<typeof MessagingApiClient>
+  private blobClient: InstanceType<typeof MessagingApiBlobClient>
   private handler: MessageHandler | null = null
   private profileCache = new Map<string, { displayName: string; cachedAt: number }>()
 
   constructor(token: string, public readonly secret: string) {
     this.client = new MessagingApiClient({ channelAccessToken: token })
+    this.blobClient = new MessagingApiBlobClient({ channelAccessToken: token })
   }
 
   async start(handler: MessageHandler): Promise<void> {
@@ -178,11 +180,30 @@ export class LineChannel implements Channel {
 
     let text: string | undefined
     let callback: string | undefined
+    let image: InboundImage | undefined
     let replyToken: string | undefined
 
     if (event.type === 'message' && event.message.type === 'text') {
       text = event.message.text
       replyToken = (event as any).replyToken
+    } else if (event.type === 'message' && event.message.type === 'image') {
+      // Photo upload — download from LINE's data CDN
+      replyToken = (event as any).replyToken
+      try {
+        const messageId = event.message.id
+        const stream = await this.blobClient.getMessageContent(messageId)
+        const chunks: Buffer[] = []
+        for await (const chunk of stream as any) {
+          chunks.push(typeof chunk === 'string' ? Buffer.from(chunk, 'utf-8') : (chunk as Buffer))
+        }
+        image = {
+          data: Buffer.concat(chunks),
+          mime: 'image/jpeg',  // LINE images are JPEG; refine when we accept others
+        }
+      } catch (err) {
+        console.error('[line image fetch failed]', err)
+        return
+      }
     } else if (event.type === 'postback') {
       callback = event.postback.data
       replyToken = (event as any).replyToken
@@ -201,6 +222,7 @@ export class LineChannel implements Channel {
       userDisplayName: display,
       text,
       callback,
+      image,
       rawCtx: event,
     }
 

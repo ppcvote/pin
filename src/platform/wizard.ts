@@ -18,6 +18,8 @@ import { saveUser, loadUser, type UserRecord, type WizardState } from '../storag
 import { executeAction } from './actionExecutor.js'
 import { findSkill, findAction } from './registry.js'
 import { render } from './template.js'
+import { saveTempBlob } from '../runtime/tempStore.js'
+import type { InboundImage } from '../channels/types.js'
 import type { ActionDef, ArgSpec, Skill } from './types.js'
 
 export type WizardButton = { text: string; callback_data?: string; url?: string }
@@ -110,6 +112,12 @@ async function promptForArg(skill: Skill, action: ActionDef, arg: ArgSpec, args:
   if (arg.input === 'text') {
     const hint = arg.placeholder ? `\n💡 例如: ${arg.placeholder}` : ''
     return { kind: 'prompt_text', text: `${header}📝 ${arg.label ?? arg.name}:${hint}`, buttons: [NAV_BTN()] }
+  }
+
+  // Image arg
+  if (arg.type === 'image' || arg.input === 'attachment') {
+    const hint = arg.placeholder ? `\n💡 ${arg.placeholder}` : ''
+    return { kind: 'prompt_text', text: `${header}📸 ${arg.label ?? arg.name} — 直接傳一張照片給我${hint}`, buttons: [NAV_BTN()] }
   }
 
   return { kind: 'error', text: `arg "${arg.name}" 沒有可收集的 UI 方式 (缺 from_action 或 input)` }
@@ -277,6 +285,33 @@ export async function processWizardCallback(user: UserRecord, callbackData: stri
     return continueWizard(user, skill, action, state)
   }
   return null
+}
+
+/** Process an inbound image while wizard is active and the current arg expects an image. */
+export async function processWizardImage(user: UserRecord, image: InboundImage): Promise<WizardOutcome | null> {
+  if (!user.wizard) return null
+  const state = user.wizard
+  const found = findAction(state.skillId, state.actionId)
+  if (!found) {
+    user.wizard = undefined
+    await saveUser(user)
+    return { kind: 'error', text: 'Wizard state invalid. Cleared.' }
+  }
+  const { skill, action } = found
+
+  if (state.argIdx >= action.args.length) return null
+  const currentArg = action.args[state.argIdx]
+  if (currentArg.type !== 'image' && currentArg.input !== 'attachment') return null
+
+  // Persist the blob to scratch space; the wizard state only carries a tmp:<...> ref.
+  const ref = saveTempBlob(image.data, image.mime)
+  state.collected[currentArg.name] = ref
+  if (!state.collected_labels) state.collected_labels = {}
+  state.collected_labels[currentArg.name] = `📸 ${image.mime} · ${(image.data.length / 1024).toFixed(0)} KB`
+  state.argIdx += 1
+  user.wizard = state
+  await saveUser(user)
+  return continueWizard(user, skill, action, state)
 }
 
 /** Process a free-text reply while wizard is active. */

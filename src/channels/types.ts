@@ -3,6 +3,15 @@
  * TG, Discord, LINE, Web, etc. all implement this.
  */
 
+export interface InboundImage {
+  /** Binary content downloaded from the channel CDN */
+  data: Buffer
+  /** Reported MIME type (e.g., "image/jpeg") */
+  mime: string
+  /** Optional original filename */
+  filename?: string
+}
+
 export interface InboundMessage {
   channelId: string         // "tg", "discord", "line", "web"
   userId: string            // stable id within that channel (e.g., TG chat_id as string)
@@ -10,6 +19,7 @@ export interface InboundMessage {
   userHandle?: string       // optional @username
   text?: string             // free-form text (null if it's a button tap)
   callback?: string         // button callback_data (null if it's text)
+  image?: InboundImage      // photo/file upload from the user
   rawCtx?: unknown          // adapter-specific original message ctx (for edits etc.)
 }
 

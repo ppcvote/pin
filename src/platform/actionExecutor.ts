@@ -1,6 +1,15 @@
 import { httpRequest } from '../products/httpRequest.js'
 import { render } from './template.js'
+import { readTempBlob } from '../runtime/tempStore.js'
 import type { ActionDef, ApiSpec, Skill, ChoiceSpec } from './types.js'
+
+/** Resolve a tmp:<id> blob reference into a base64 data URL for JSON bodies. */
+function maybeResolveBlob(value: any): any {
+  if (typeof value !== 'string' || !value.startsWith('tmp:')) return value
+  const blob = readTempBlob(value)
+  if (!blob) return value
+  return `data:${blob.mime};base64,${blob.data.toString('base64')}`
+}
 
 /** Resolve a path like "data.accounts" on the response object. */
 function pathLookup(obj: any, path: string): any {
@@ -89,7 +98,10 @@ async function callApi(api: ApiSpec, args: Record<string, any>): Promise<any> {
   if (api.body && (api.method === 'POST' || api.method === 'PUT')) {
     const resolved: Record<string, any> = {}
     for (const [k, v] of Object.entries(api.body)) {
-      resolved[k] = typeof v === 'string' ? resolve(v, args) : v
+      let val: any = typeof v === 'string' ? resolve(v, args) : v
+      // If the resolved value is a tmp:<id> ref, inline the binary as a data URL
+      val = maybeResolveBlob(val)
+      resolved[k] = val
     }
     body = JSON.stringify(resolved)
   }

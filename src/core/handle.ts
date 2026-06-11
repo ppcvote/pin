@@ -4,7 +4,7 @@ import { appendHistory } from '../brain/memory.js'
 import { findAction, findSkill, allSkills } from '../platform/registry.js'
 import { rootMenu, skillMenu, parseCallback } from '../platform/menuRenderer.js'
 import { executeAction } from '../platform/actionExecutor.js'
-import { startWizard, processWizardCallback, processWizardText, type WizardOutcome } from '../platform/wizard.js'
+import { startWizard, processWizardCallback, processWizardText, processWizardImage, type WizardOutcome } from '../platform/wizard.js'
 import { createBindingToken } from '../platform/binding.js'
 import { buildAgentCardData, renderAgentCardText } from '../platform/agentCard.js'
 import { incrementStat } from '../runtime/stats.js'
@@ -90,6 +90,11 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       // Reload to avoid stale state across concurrent turns
       user = (await loadUser(userKey)) ?? user
       const outcome = await processWizardCallback(user, msg.callback)
+      if (outcome) return wizardOutcomeToReply(outcome, skill)
+    }
+    if (msg.image) {
+      user = (await loadUser(userKey)) ?? user
+      const outcome = await processWizardImage(user, msg.image)
       if (outcome) return wizardOutcomeToReply(outcome, skill)
     }
     if (msg.text && !msg.text.startsWith('/')) {

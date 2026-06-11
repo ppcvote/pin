@@ -8,7 +8,7 @@ export interface ArgOption {
 export interface ArgSpec {
   name: string
   label: string
-  type?: 'string' | 'number' | 'enum'
+  type?: 'string' | 'number' | 'enum' | 'image'
   /** Static enum — list of {value, label} the wizard renders as buttons.
    *  Use when you want full control over button text (e.g. localized labels). */
   options?: ArgOption[]
@@ -19,7 +19,7 @@ export interface ArgSpec {
   from_path?: string
   select_key?: string
   display_key?: string
-  input?: 'text'
+  input?: 'text' | 'attachment'
   placeholder?: string
 }
 
