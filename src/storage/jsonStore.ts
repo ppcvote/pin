@@ -1,0 +1,87 @@
+import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+
+const DATA_ROOT = join(process.cwd(), 'data', 'users')
+
+export interface UserRecord {
+  chatId: number
+  firstName: string
+  username?: string
+  onboardedAt: string
+  reminders: Reminder[]
+  notes: Note[]
+  expenses: Expense[]
+}
+
+export interface Reminder {
+  id: string
+  when: string  // ISO datetime
+  text: string
+  fired: boolean
+  createdAt: string
+}
+
+export interface Note {
+  id: string
+  text: string
+  tags: string[]
+  createdAt: string
+}
+
+export interface Expense {
+  id: string
+  amount: number
+  currency: 'TWD' | 'HKD' | 'USD'
+  category: string
+  note: string
+  createdAt: string
+}
+
+function userFile(chatId: number): string {
+  return join(DATA_ROOT, `${chatId}.json`)
+}
+
+export async function loadUser(chatId: number): Promise<UserRecord | null> {
+  const file = userFile(chatId)
+  if (!existsSync(file)) return null
+  const raw = await readFile(file, 'utf-8')
+  return JSON.parse(raw) as UserRecord
+}
+
+export async function saveUser(record: UserRecord): Promise<void> {
+  const file = userFile(record.chatId)
+  await mkdir(dirname(file), { recursive: true })
+  await writeFile(file, JSON.stringify(record, null, 2), 'utf-8')
+}
+
+export async function ensureUser(
+  chatId: number,
+  firstName: string,
+  username?: string
+): Promise<UserRecord> {
+  let user = await loadUser(chatId)
+  if (user) return user
+  user = {
+    chatId,
+    firstName,
+    username,
+    onboardedAt: new Date().toISOString(),
+    reminders: [],
+    notes: [],
+    expenses: [],
+  }
+  await saveUser(user)
+  return user
+}
+
+export async function* iterAllUsers(): AsyncGenerator<UserRecord> {
+  if (!existsSync(DATA_ROOT)) return
+  const { readdir } = await import('node:fs/promises')
+  const files = await readdir(DATA_ROOT)
+  for (const f of files) {
+    if (!f.endsWith('.json')) continue
+    const raw = await readFile(join(DATA_ROOT, f), 'utf-8')
+    yield JSON.parse(raw) as UserRecord
+  }
+}
