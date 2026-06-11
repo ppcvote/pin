@@ -13,6 +13,7 @@ import { handlePinMessage } from './core/handle.js'
 import { brainName } from './brain/index.js'
 import { startWebhookServer } from './server/webhooks.js'
 import { deliverWithRetry } from './runtime/deliver.js'
+import { reportWeeklyActive } from './runtime/flywheelReporter.js'
 import type { Channel } from './channels/types.js'
 
 // Boot the skill registry (loads ./skills/*/SKILL.md)
@@ -51,6 +52,15 @@ startWebhookServer(channels)
 const skillNames = allSkills().map(s => s.name).join(', ')
 const totalWebhooks = allSkills().reduce((n, s) => n + (s.pin?.webhooks?.length ?? 0), 0)
 console.log(`Pin online · channels=${channels.map(c => c.name).join('+')} · brain=${brainName} · skills=[${skillNames}] · webhooks=${totalWebhooks}`)
+
+// Cron — FLYWHEEL §3 weekly active rollup (Sunday 23:00 server time)
+cron.schedule('0 23 * * 0', async () => {
+  try {
+    await reportWeeklyActive()
+  } catch (err) {
+    console.error('[flywheel weekly cron]', err)
+  }
+})
 
 // Cron — reminders (channel-agnostic outbound)
 cron.schedule('* * * * *', async () => {

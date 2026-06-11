@@ -10,6 +10,7 @@ import { buildAgentCardData, renderAgentCardText } from '../platform/agentCard.j
 import { incrementStat, incrementAgentStat } from '../runtime/stats.js'
 import { redeemBindToken } from '../storage/bindTokens.js'
 import { saveUser } from '../storage/jsonStore.js'
+import { reportBound } from '../runtime/flywheelReporter.js'
 import { agentRoute, isAgentModeEnabled } from '../brain/agentRouter.js'
 import { recentHistory } from '../brain/memory.js'
 import type { InboundMessage, OutboundReply, Button, ThemeHint } from '../channels/types.js'
@@ -427,9 +428,36 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     if (!skill) return { text: '🔒 連結已失效, 請回到產品頁面重新點擊' }
     u.bindings = { ...(u.bindings ?? {}), [entry.skillName]: { tenantKey: entry.tenantKey, boundAt: new Date().toISOString() } }
     await saveUser(u)
+    // Flywheel §3 — fire-and-forget pin_bound event
+    reportBound(userKey, entry.skillName)
     const icon = skill.pin?.icon ?? '•'
     const view = skillMenu(skill.id)
     const buttons = view ? withUnbindButton(view.buttons, skill.id, true) : undefined
+
+    // FLYWHEEL §2 — UltraGrowth bind-ceremony: lead with the AVS before/after
+    // shipped in the token's meta. First impression is the value proof.
+    if (entry.skillName === 'ultragrowth' && entry.meta?.avs_before != null && entry.meta?.avs_after != null) {
+      const before = Number(entry.meta.avs_before)
+      const after = Number(entry.meta.avs_after)
+      const delta = after - before
+      const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '—'
+      return {
+        text: [
+          `✅ 已連接 ${icon} ${skill.name}`,
+          ``,
+          `📊 你的 AVS 病歷對比 (來自 UltraGrowth 服務介入前 → 現在):`,
+          ``,
+          `  服務前  ${before}/100`,
+          `  現在    ${after}/100   ${arrow} ${Math.abs(delta)} 分`,
+          ``,
+          `這就是你每月 NT$2,990 換到的數字。`,
+          `之後每週 Pin 會在這裡更新你的成效 → 從不卡頓 → 從不忘記。`,
+        ].join('\n'),
+        buttons,
+        theme: { primaryColor: skill.pin?.primary_color, icon, title: skill.name },
+      }
+    }
+
     return {
       text: `✅ 已連接 ${icon} ${skill.name}\n\n（tenant: ${entry.tenantKey}）`,
       buttons,

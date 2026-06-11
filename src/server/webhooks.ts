@@ -122,7 +122,7 @@ export function startWebhookServer(channels: Channel[]): http.Server {
         if (total > 4096) { res.writeHead(413); res.end(); return }
         chunks.push(buf)
       }
-      let payload: { skillName?: string; tenantKey?: string; productApiKey?: string }
+      let payload: { skillName?: string; tenantKey?: string; productApiKey?: string; meta?: Record<string, any> }
       try { payload = JSON.parse(Buffer.concat(chunks).toString('utf-8')) } catch {
         res.writeHead(400, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'invalid_json' }))
@@ -154,8 +154,8 @@ export function startWebhookServer(channels: Channel[]): http.Server {
         res.end(JSON.stringify({ error: 'bad_product_api_key' }))
         return
       }
-      const entry = await createBindToken(payload.skillName, payload.tenantKey)
-      console.log(`[bind/token] issued skill=${entry.skillName} tenant=${entry.tenantKey} ttl_min=10`)
+      const entry = await createBindToken(payload.skillName, payload.tenantKey, payload.meta)
+      console.log(`[bind/token] issued skill=${entry.skillName} tenant=${entry.tenantKey} ttl_min=10${payload.meta ? ' (with meta)' : ''}`)
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ token: entry.token, expiresAt: entry.expiresAt }))
       return

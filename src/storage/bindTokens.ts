@@ -25,6 +25,9 @@ export interface BindTokenEntry {
   createdAt: string
   expiresAt: string
   used: boolean
+  /** Product-supplied opaque payload, surfaced to the bind-welcome handler.
+   *  Used by FLYWHEEL §2 to carry AVS before/after for the ultragrowth welcome. */
+  meta?: Record<string, any>
 }
 
 type Store = Record<string, BindTokenEntry>
@@ -48,7 +51,7 @@ function pruneExpired(store: Store): Store {
   return out
 }
 
-export async function createBindToken(skillName: string, tenantKey: string): Promise<BindTokenEntry> {
+export async function createBindToken(skillName: string, tenantKey: string, meta?: Record<string, any>): Promise<BindTokenEntry> {
   const token = crypto.randomBytes(16).toString('hex')  // 32 hex chars = 128 bits
   const now = Date.now()
   const entry: BindTokenEntry = {
@@ -58,6 +61,7 @@ export async function createBindToken(skillName: string, tenantKey: string): Pro
     createdAt: new Date(now).toISOString(),
     expiresAt: new Date(now + TTL_MS).toISOString(),
     used: false,
+    meta,
   }
   const store = pruneExpired(await loadStore())
   store[token] = entry
