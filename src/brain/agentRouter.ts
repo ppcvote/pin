@@ -60,8 +60,8 @@ function buildPrompt(tools: CompiledTool[], history: HistoryEntry[], userText: s
     '   {"decision":"execute","action":"<tool_name>","args":{...}}',
     '',
     '2) Two or more plausible interpretations exist, OR you cannot fill a required arg:',
-    '   {"decision":"clarify","candidates":["<tool_name>","<tool_name>","..."],"question":"<≤140 chars in user language>"}',
-    '   (max 4 candidates)',
+    '   {"decision":"clarify","candidates":["<tool_name>","<tool_name>","..."],"question":"<short Chinese question, ≤80 chars total>"}',
+    '   (max 4 candidates. question must end with ? or 。 — short!)',
     '',
     '3) Not related to any tool (chitchat / general question):',
     '   {"decision":"none","reply":"<≤200 chars in user language>"}',
@@ -103,13 +103,21 @@ export async function agentRoute(user: UserRecord, userText: string, history: Hi
     return { kind: 'fallback', reason: 'no_tools_for_user' }
   }
   const prompt = buildPrompt(tools, history, userText)
-  const raw = await withTimeout(generate(prompt, { temperature: 0.1, max: 400 }), LLM_TIMEOUT_MS)
+  const raw = await withTimeout(generate(prompt, { temperature: 0.1, max: 800 }), LLM_TIMEOUT_MS)
   if (raw === null) {
     console.warn('[agentRoute] LLM timeout — falling back to menu')
     return { kind: 'fallback', reason: 'llm_timeout' }
   }
   const obj = parseLlmJson(raw)
   if (!obj || typeof obj !== 'object') {
+    // Gemini occasionally returns prose instead of JSON despite the strict instruction.
+    // Treat as a soft "none" using its text — better UX than the bare "我這邊路由曖昧"
+    // fallback, which makes Pin look broken.
+    const cleanText = raw.replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim()
+    if (cleanText.length > 5 && cleanText.length < 600) {
+      console.warn('[agentRoute] LLM emitted prose, treating as none-decision')
+      return { kind: 'none', reply: cleanText.slice(0, 400) }
+    }
     console.warn('[agentRoute] LLM JSON parse failed — falling back')
     return { kind: 'fallback', reason: 'parse_failed' }
   }
