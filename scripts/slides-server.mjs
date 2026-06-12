@@ -37,6 +37,31 @@ if (!API_KEY) { console.error('[slides] SLIDES_API_KEY missing'); process.exit(1
 if (!GEMINI_KEY) { console.error('[slides] GEMINI_API_KEY missing'); process.exit(1) }
 if (!existsSync(TMP)) mkdirSync(TMP, { recursive: true })
 
+// ── Abuse guards (the bot has no user allowlist, so the service self-limits) ──
+// Daily cap protects the LLM quota; the render lock serializes Chrome
+// (one headless render at a time, small wait queue, then busy).
+const DAILY_CAP = parseInt(process.env.SLIDES_DAILY_CAP ?? '40', 10)
+let dayBucket = ''
+let dayCount = 0
+function dailyCapExceeded() {
+  const today = new Date().toISOString().slice(0, 10)
+  if (dayBucket !== today) { dayBucket = today; dayCount = 0 }
+  if (dayCount >= DAILY_CAP) return true
+  dayCount++
+  return false
+}
+let active = 0
+let waiting = 0
+const MAX_WAITING = 3
+async function withRenderSlot(fn) {
+  if (active > 0 && waiting >= MAX_WAITING) throw Object.assign(new Error('busy'), { busy: true })
+  waiting++
+  while (active > 0) await new Promise(r => setTimeout(r, 500))
+  waiting--
+  active++
+  try { return await fn() } finally { active-- }
+}
+
 // ── LLM: fill the slot schema ────────────────────────────────────────────
 
 const SCHEMA_DOC = `{
@@ -364,29 +389,36 @@ const server = http.createServer(async (req, res) => {
     const notes = String(body.notes ?? '').trim()
     if (!topic) return json(400, { error: 'topic_required' })
 
+    if (dailyCapExceeded()) {
+      console.warn(`[slides] daily cap hit (${DAILY_CAP})`)
+      return json(429, { error: 'daily_cap_reached' })
+    }
     const t0 = Date.now()
     try {
-      console.log(`[slides] deck start style=${style} topic="${topic.slice(0, 60)}"`)
-      const deck = await geminiGenerate(buildPrompt(style, topic, notes || '(無補充素材,僅就主題常識性展開,不要編造具體數據)'))
-      const id = crypto.randomBytes(8).toString('hex')
-      const htmlPath = join(TMP, `deck_${id}.html`)
-      const pdfPath = join(TMP, `deck_${id}.pdf`)
-      const pngPath = join(TMP, `deck_${id}.png`)
-      writeFileSync(htmlPath, renderDeckHTML(deck, style), 'utf-8')
-      printPDF(htmlPath, pdfPath)
-      const pageCount = previewPNG(pdfPath, pngPath)
-      // sidecars so Pin's /image/<name> endpoint serves correct mime
-      writeFileSync(`${pdfPath}.meta`, JSON.stringify({ mime: 'application/pdf' }), 'utf-8')
-      writeFileSync(`${pngPath}.meta`, JSON.stringify({ mime: 'image/png' }), 'utf-8')
-      console.log(`[slides] deck done id=${id} pages=${pageCount} ms=${Date.now() - t0}`)
-      return json(200, {
-        id,
-        title: deck.title,
-        pages: pageCount,
-        pdf_url: `${PUBLIC_URL}/image/deck_${id}.pdf`,
-        preview_url: `${PUBLIC_URL}/image/deck_${id}.png`,
+      return await withRenderSlot(async () => {
+        console.log(`[slides] deck start style=${style} topic="${topic.slice(0, 60)}"`)
+        const deck = await geminiGenerate(buildPrompt(style, topic, notes || '(無補充素材,僅就主題常識性展開,不要編造具體數據)'))
+        const id = crypto.randomBytes(8).toString('hex')
+        const htmlPath = join(TMP, `deck_${id}.html`)
+        const pdfPath = join(TMP, `deck_${id}.pdf`)
+        const pngPath = join(TMP, `deck_${id}.png`)
+        writeFileSync(htmlPath, renderDeckHTML(deck, style), 'utf-8')
+        printPDF(htmlPath, pdfPath)
+        const pageCount = previewPNG(pdfPath, pngPath)
+        // sidecars so Pin's /image/<name> endpoint serves correct mime
+        writeFileSync(`${pdfPath}.meta`, JSON.stringify({ mime: 'application/pdf' }), 'utf-8')
+        writeFileSync(`${pngPath}.meta`, JSON.stringify({ mime: 'image/png' }), 'utf-8')
+        console.log(`[slides] deck done id=${id} pages=${pageCount} ms=${Date.now() - t0} (${dayCount}/${DAILY_CAP} today)`)
+        return json(200, {
+          id,
+          title: deck.title,
+          pages: pageCount,
+          pdf_url: `${PUBLIC_URL}/image/deck_${id}.pdf`,
+          preview_url: `${PUBLIC_URL}/image/deck_${id}.png`,
+        })
       })
     } catch (err) {
+      if (err.busy) return json(429, { error: 'busy_try_again_shortly' })
       console.error('[slides] deck failed:', err.message)
       return json(502, { error: 'generation_failed', detail: err.message.slice(0, 200) })
     }
