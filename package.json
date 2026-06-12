@@ -23,6 +23,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@ppcvote/prompt-shield": "^1.2.0",
     "@resvg/resvg-js": "^2.6.2",
+    "agent-threat-rules": "^3.3.1",
     "chrono-node": "^2.7.7",
     "dotenv": "^16.4.5",
     "node-cron": "^3.0.3",

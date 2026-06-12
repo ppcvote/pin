@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import type { Skill, PinExtension } from './types.js'
+import { scanSkillContent, describeMatch } from './skillThreatScan.js'
 
 const SKILLS_DIR = join(process.cwd(), 'skills')
 
@@ -143,6 +144,19 @@ export function loadSkill(skillDir: string): Skill {
   if (errs.length > 0) {
     throw new Error(`Invalid skill ${skillDir}:\n  - ${errs.join('\n  - ')}`)
   }
+
+  // Protection #6 — ATR threat scan over the raw file (frontmatter + body).
+  // Critical match refuses the skill; lower severities load but are logged.
+  const scan = scanSkillContent(raw)
+  for (const w of scan.warnings) {
+    console.warn(`[atr] ${skillDir}: ${describeMatch(w)} — loaded anyway (below critical)`)
+  }
+  if (scan.blocked) {
+    throw new Error(
+      `Skill ${skillDir} refused by ATR threat scan:\n  - ${scan.critical.map(describeMatch).join('\n  - ')}`,
+    )
+  }
+
   return skill
 }
 

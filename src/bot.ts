@@ -6,6 +6,7 @@ dns.setDefaultResultOrder('ipv4first')
 
 import cron from 'node-cron'
 import { bootRegistry, allSkills } from './platform/registry.js'
+import { initSkillThreatScan } from './platform/skillThreatScan.js'
 import { findDueReminders, markReminderFired } from './skills/reminders.js'
 import { TelegramChannel } from './channels/telegram.js'
 import { LineChannel } from './channels/line.js'
@@ -16,7 +17,9 @@ import { deliverWithRetry } from './runtime/deliver.js'
 import { reportWeeklyActive } from './runtime/flywheelReporter.js'
 import type { Channel } from './channels/types.js'
 
-// Boot the skill registry (loads ./skills/*/SKILL.md)
+// Arm the ATR threat scanner first, then boot the skill registry
+// (loads ./skills/*/SKILL.md —每份 skill 載入前先過 ATR 掃描)
+await initSkillThreatScan()
 bootRegistry()
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN

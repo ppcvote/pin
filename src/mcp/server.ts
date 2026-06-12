@@ -29,10 +29,12 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import { bootRegistry, allSkills } from '../platform/registry.js'
+import { initSkillThreatScan } from '../platform/skillThreatScan.js'
 import { executeAction } from '../platform/actionExecutor.js'
 import type { ArgSpec } from '../platform/types.js'
 
-// Load skills before registering
+// Load skills before registering — ATR threat scan armed first
+await initSkillThreatScan()
 bootRegistry()
 
 const server = new McpServer({

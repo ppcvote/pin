@@ -7,6 +7,7 @@
  */
 
 import { allSkills } from './registry.js'
+import { skillScanActive, skillScanRuleCount } from './skillThreatScan.js'
 
 export interface Protection {
   id: string
@@ -49,6 +50,15 @@ export const PROTECTIONS: Protection[] = [
     label: '入站事件強制簽章',
     detail: 'no opt-out, missing config rejects',
     isActive: () => true,
+  },
+  {
+    id: 'atr_skill_scan',
+    label: 'ATR skill 載入掃描',
+    get detail() {
+      return `agent-threat-rules · ${skillScanRuleCount()} rules · critical 拒載`
+    },
+    // Real runtime state: only on when the engine actually loaded rules.
+    isActive: () => skillScanActive(),
   },
   {
     id: 'prompt_shield',

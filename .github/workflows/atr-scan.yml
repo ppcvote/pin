@@ -1,0 +1,27 @@
+# ATR (Agent Threat Rules) scan — every skill in skills/ is checked against
+# the open agent-threat-rules pack on each push/PR. Findings land in the
+# repo Security tab as SARIF. Same ruleset the runtime enforces at load time
+# (src/platform/skillThreatScan.ts).
+name: ATR Scan
+
+on:
+  push:
+    branches: [main]
+    paths: ['skills/**', '.github/workflows/atr-scan.yml']
+  pull_request:
+    paths: ['skills/**']
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  atr-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Agent-Threat-Rule/agent-threat-rules@v1
+        with:
+          path: 'skills'
+          severity: 'medium'
+          upload-sarif: 'true'
