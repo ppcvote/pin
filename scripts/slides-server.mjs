@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Slides generator service — the product backend behind skills/slides.
  *
  * Architecture: Pin stays deterministic; this service owns the generative
@@ -89,6 +89,12 @@ const SCHEMA_DOC = `{
       "panel": { "title": "深色面板標題(可選)", "paras": ["段落1", "段落2"] } },
     { "kind": "points", "label": "章節標籤", "heading": "頁標題", "intro": "導言(可選)",
       "cards": [ { "title": "卡片標題", "body": "卡片內文(2-4句)" } ] },
+    { "kind": "flow", "label": "章節標籤", "heading": "頁標題", "intro": "導言(可選)",
+      "steps": [ { "title": "步驟名(短)", "desc": "一兩句說明" } ] },
+    { "kind": "compare", "label": "章節標籤", "heading": "頁標題", "intro": "導言(可選)",
+      "left": { "title": "甲方案/現狀", "points": ["要點1", "要點2", "要點3"] },
+      "right": { "title": "乙方案/主張", "points": ["要點1", "要點2", "要點3"] },
+      "verdict": "一句裁決(可選)" },
     { "kind": "script", "label": "章節標籤", "heading": "頁標題", "intro": "導言(可選)",
       "scenes": [ { "tag": "情境標籤", "quote": "整段可照念的話術/重點原文", "action": "→ 接續動作一句(可選)" } ] },
     { "kind": "quote", "text": "金句", "attribution": "出處 / 人名 / 場合" },
@@ -114,12 +120,19 @@ function buildPrompt(style, topic, notes) {
     `規則:`,
     `1. 只輸出 JSON,符合這個 schema(pages 不含封面,封面由 title/kicker/lede 生成):`,
     SCHEMA_DOC,
-    `2. 繁體中文。**寧可頁數少、每一頁塞滿**:points 頁一律給 4 張卡片、每張 body 寫 3-5 句完整論述;`,
-    `   stats 頁必須同時附 panel(2-3 段);script 頁給 2-3 個 scene、quote 要長到可以照念;`,
-    `   closing 給 4-5 條 takeaways、每條兩短句。半空的頁面是失敗的頁面。`,
-    `3. pages 順序自選,但最後一頁必須是 closing。stats 最多 4 個數字;素材裡沒有可靠數字就不要用 stats 頁。`,
-    `   stats 的 num 是純數字(畫圖表用):只有同組數字互相可比較(同單位同量級)時才提供,否則省略。`,
-    `4. meta 放 3 個鍵值對,鍵用英文大寫單詞(SERIES/DATE/FOR/SECTOR 等),DATE 一律用 ${today}。`,
+    `2. 【最重要】寫法決定一切:`,
+    `   - 每頁的 heading 必須是「論斷句」,不是名詞短語。寫「台灣是這場遊戲的收費站」,不寫「台灣的角色」。`,
+    `   - 禁用空話:「扮演關鍵角色」「不可或缺」「日益重要」「賦能」「具有戰略意義」「奠定基礎」這類`,
+    `     沒有資訊量的句子一律不准出現。每一句都要有具體的事實、數字、或立場。`,
+    `   - 大量引用素材的原句和原始數字,寧可照抄素材的銳利句子,不要改寫成平庸的官腔。`,
+    `   - 在 body/intro/points/takeaways 裡用 **粗體** 標記每段最關鍵的字詞(每頁 2-4 處),製造視覺層次。`,
+    `   - 句子長短交錯。短句收尾。`,
+    `3. 【視覺強制】整份簡報至少要有一頁是視覺頁:有可比數字 → stats(附 num);有流程/步驟/因果鏈 → flow;`,
+    `   有對立觀點/前後對比/方案取捨 → compare。素材撐得起就給兩頁視覺頁。`,
+    `4. 結構:5-7 頁,最後一頁必須 closing(4-5 條 takeaways,每條一個論斷+一句理由)。`,
+    `   points 頁 3-4 張卡片,每張卡片講一個「不同」的論點,不要換句話說同一件事。`,
+    `   stats 的 num 是純數字(畫圖表用):只有同組數字可比較(同單位同量級)時才提供。`,
+    `5. meta 放 3 個鍵值對,鍵用英文大寫單詞(SERIES/DATE/FOR/SECTOR 等),DATE 一律用 ${today}。`,
   ].join('\n')
 }
 
@@ -159,6 +172,8 @@ function geminiGenerate(prompt) {
 // ── HTML renderers ───────────────────────────────────────────────────────
 
 const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+// esc + markdown-style **bold** → <b> (the only inline markup we allow the LLM)
+const fmt = s => esc(s).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
 
 const FONT_SANS = `'Noto Sans TC','Microsoft JhengHei',sans-serif`
 const FONT_SERIF = `Georgia,'Noto Serif TC','Times New Roman',PMingLiU,serif`
@@ -220,6 +235,23 @@ function researchCSS() {
   .scene .tag { font-family:${FONT_MONO}; font-size:7.5pt; letter-spacing:0.16em; color:#C0492F; text-transform:uppercase; margin-bottom:3mm; }
   .scene .q { font-family:${FONT_SERIF}; font-size:11pt; line-height:1.85; color:#2A3343; }
   .scene .act { font-size:9pt; color:#6B7280; margin-top:3mm; }
+  .card p b, .statrow b, .takeaway b, .lede b { background:linear-gradient(transparent 62%, #F2D7CD 62%); font-weight:700; }
+  .flow { display:flex; align-items:stretch; gap:4mm; margin-top:4mm; }
+  .fstep { flex:1; background:#FFFFFF; border:1px solid #E5DFD0; border-top:2.5px solid #C0492F; padding:6mm; }
+  .fnum { font-family:Georgia,'Noto Serif TC',serif; font-style:italic; font-size:14pt; color:#C0492F; margin-bottom:3mm; }
+  .ftitle { font-size:12pt; font-weight:700; margin-bottom:2.5mm; }
+  .fdesc { font-size:9pt; line-height:1.75; color:#3A4150; }
+  .farrow { align-self:center; color:#C0492F; font-size:14pt; }
+  .cmp { display:flex; gap:6mm; align-items:stretch; margin-top:4mm; }
+  .cmpcol { flex:1; padding:7mm 8mm; }
+  .cmpcol.cl { background:#FFFFFF; border:1px solid #E5DFD0; }
+  .cmpcol.cr { background:#1B2433; color:#EDE8DC; }
+  .cmpcol.cr .cmppt { color:#C9C3B4; border-color:#2C3850; }
+  .cmptitle { font-size:13pt; font-weight:700; margin-bottom:4mm; }
+  .cmpcol.cr .cmptitle { color:#F0EBDD; }
+  .cmppt { font-size:9.5pt; line-height:1.8; color:#3A4150; border-top:1px solid #EDE7DA; padding:3mm 0; }
+  .cmpvs { align-self:center; font-family:Georgia,serif; font-style:italic; font-size:13pt; color:#C0492F; }
+  .verdict { margin-top:5mm; border-left:2.5px solid #C0492F; padding-left:5mm; font-size:11pt; font-weight:700; }
   .quotepage { display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; }
   .bigquote { font-family:${FONT_SERIF}; font-size:21pt; line-height:1.8; color:#1F2733; max-width:200mm; }
   .attr { font-family:${FONT_MONO}; font-size:8.5pt; letter-spacing:0.14em; color:#9A937F; margin-top:9mm; text-transform:uppercase; }
@@ -271,6 +303,21 @@ function opsCSS() {
   .scene .tag { font-family:${FONT_MONO}; font-size:7.5pt; letter-spacing:0.18em; color:#D96C5A; text-transform:uppercase; margin-bottom:3mm; }
   .scene .q { font-size:10.5pt; line-height:2.0; color:#E8E4DC; }
   .scene .act { font-size:9pt; color:#8E887C; margin-top:3mm; }
+  .card p b, .scene .q b, .takeaway b, .lede b { color:#F2EEE6; border-bottom:1px solid #C8332B; font-weight:700; }
+  .flow { display:flex; flex-direction:column; gap:3.5mm; margin-top:4mm; }
+  .fstep { display:flex; align-items:baseline; gap:5mm; border:1px solid #2A2A2E; border-left:2.5px solid #C8332B; background:#121214; padding:5mm 6mm; }
+  .fnum { font-family:Consolas,monospace; font-size:11pt; color:#C8332B; min-width:10mm; }
+  .ftitle { font-size:11.5pt; font-weight:700; color:#F2EEE6; min-width:34mm; }
+  .fdesc { font-size:9pt; line-height:1.8; color:#A8A296; }
+  .farrow { display:none; }
+  .cmp { display:flex; gap:5mm; margin-top:4mm; }
+  .cmpcol { flex:1; padding:6mm 7mm; border:1px solid #2A2A2E; background:#121214; }
+  .cmpcol.cr { border-color:#C8332B; }
+  .cmptitle { font-size:12pt; font-weight:700; color:#F2EEE6; margin-bottom:3.5mm; }
+  .cmpcol.cr .cmptitle { color:#D96C5A; }
+  .cmppt { font-size:9.5pt; line-height:1.85; color:#A8A296; border-top:1px solid #232326; padding:3mm 0; }
+  .cmpvs { align-self:center; font-family:Consolas,monospace; font-size:10pt; color:#C8332B; text-transform:uppercase; }
+  .verdict { margin-top:5mm; border-left:2.5px solid #C8332B; padding-left:5mm; font-size:10.5pt; font-weight:700; color:#F2EEE6; }
   .quotepage { display:flex; flex-direction:column; justify-content:center; }
   .bigquote { font-size:18pt; line-height:2.0; font-weight:700; color:#F2EEE6; border-left:3px solid #C8332B; padding-left:8mm; }
   .attr { font-family:${FONT_MONO}; font-size:8.5pt; letter-spacing:0.16em; color:#7A746A; margin-top:8mm; text-transform:uppercase; }
@@ -288,7 +335,7 @@ function renderCover(deck, style) {
       <div class="masthead"><div class="mono">${esc(deck.kicker)}</div><div class="mono red">CLASSIFIED — INTERNAL USE ONLY</div></div>
       <div class="cover-block">
         <div class="cover-title">${esc(deck.title)}${deck.title_en ? `<div class="mono" style="margin-top:5mm; font-size:9pt; color:#A8A296">${esc(deck.title_en)}</div>` : ''}</div>
-        <div class="lede">${esc(deck.lede).replace(/\n/g, '<br>')}</div>
+        <div class="lede">${fmt(deck.lede).replace(/\n/g, '<br>')}</div>
       </div>
       <div class="cover-foot metas">${metaRow(deck.meta, 'meta')}</div>
     </section>`
@@ -298,7 +345,7 @@ function renderCover(deck, style) {
     <div class="kicker">${esc(deck.kicker)}</div>
     <div class="cover-title serif">${esc(deck.title)}</div>
     ${deck.title_en ? `<div class="cover-en">${esc(deck.title_en)}</div>` : ''}
-    <div class="lede">${esc(deck.lede).replace(/\n/g, '<br>')}</div>
+    <div class="lede">${fmt(deck.lede).replace(/\n/g, '<br>')}</div>
     <div class="footrule">本內容供內部參考</div><div class="pageno">P. 01</div>
   </section>`
 }
@@ -315,7 +362,23 @@ function pageChrome(inner, label, idx, total, deck, style) {
 }
 
 function renderPage(p, idx, total, deck, style) {
-  const intro = p.intro ? `<p class="intro">${esc(p.intro)}</p>` : ''
+  const intro = p.intro ? `<p class="intro">${fmt(p.intro)}</p>` : ''
+  if (p.kind === 'flow') {
+    const steps = (p.steps ?? []).slice(0, 5).map((s, i) => `
+      <div class="fstep"><div class="fnum">${String(i + 1).padStart(2, '0')}</div>
+      <div class="ftitle">${esc(s.title)}</div><div class="fdesc">${fmt(s.desc)}</div></div>`)
+      .join(`<div class="farrow">→</div>`)
+    return pageChrome(`<h2 class="heading">${fmt(p.heading)}</h2>${intro}<div class="flow">${steps}</div>`, p.label, idx, total, deck, style)
+  }
+  if (p.kind === 'compare') {
+    const col = (side, cls) => `
+      <div class="cmpcol ${cls}"><div class="cmptitle">${esc(side?.title ?? '')}</div>
+      ${(side?.points ?? []).slice(0, 5).map(t => `<div class="cmppt">${fmt(t)}</div>`).join('')}</div>`
+    const verdict = p.verdict ? `<div class="verdict">${fmt(p.verdict)}</div>` : ''
+    return pageChrome(`<h2 class="heading">${fmt(p.heading)}</h2>${intro}
+      <div class="cmp">${col(p.left, 'cl')}<div class="cmpvs">vs</div>${col(p.right, 'cr')}</div>${verdict}`,
+      p.label, idx, total, deck, style)
+  }
   if (p.kind === 'stats') {
     const chart = svgBars(p.stats, style)
     // With a chart, big stat cards would duplicate the bars AND overflow the
@@ -325,36 +388,36 @@ function renderPage(p, idx, total, deck, style) {
          <div class="sv">${esc(s.value)}${s.unit ? `<span class="unit">${esc(s.unit)}</span>` : ''}</div></div>`
       : `<div class="statcard"><div class="sk">${esc(s.label)}</div>
       <div class="sv">${esc(s.value)}${s.unit ? `<span class="unit">${esc(s.unit)}</span>` : ''}</div>
-      ${s.note ? `<div class="sn">${esc(s.note)}</div>` : ''}</div>`).join('')
+      ${s.note ? `<div class="sn">${fmt(s.note)}</div>` : ''}</div>`).join('')
     const panel = p.panel ? `<div class="darkpanel"><div class="dt">${esc(p.panel.title)}</div>
-      ${(p.panel.paras ?? []).map(t => `<p>${esc(t)}</p>`).join('')}</div>` : ''
+      ${(p.panel.paras ?? []).map(t => `<p>${fmt(t)}</p>`).join('')}</div>` : ''
     const innerBody = style === 'ops'
       ? `<div class="statgrid">${stats}</div>${chart}${panel}`
       : `<div class="statgrid"><div class="statcol">${stats}${chart}</div>${panel}</div>`
-    return pageChrome(`<h2 class="heading">${esc(p.heading)}</h2>${intro}${innerBody}`, p.label, idx, total, deck, style)
+    return pageChrome(`<h2 class="heading">${fmt(p.heading)}</h2>${intro}${innerBody}`, p.label, idx, total, deck, style)
   }
   if (p.kind === 'points') {
     const cards = (p.cards ?? []).slice(0, 4).map(c =>
-      `<div class="card"><h3>${esc(c.title)}</h3><p>${esc(c.body)}</p></div>`).join('')
-    return pageChrome(`<h2 class="heading">${esc(p.heading)}</h2>${intro}<div class="cards">${cards}</div>`, p.label, idx, total, deck, style)
+      `<div class="card"><h3>${esc(c.title)}</h3><p>${fmt(c.body)}</p></div>`).join('')
+    return pageChrome(`<h2 class="heading">${fmt(p.heading)}</h2>${intro}<div class="cards">${cards}</div>`, p.label, idx, total, deck, style)
   }
   if (p.kind === 'script') {
     const scenes = (p.scenes ?? []).slice(0, 3).map(s => `
-      <div class="scene"><div class="tag">${esc(s.tag)}</div><div class="q">「${esc(s.quote)}」</div>
-      ${s.action ? `<div class="act">${esc(s.action)}</div>` : ''}</div>`).join('')
-    return pageChrome(`<h2 class="heading">${esc(p.heading)}</h2>${intro}${scenes}`, p.label, idx, total, deck, style)
+      <div class="scene"><div class="tag">${esc(s.tag)}</div><div class="q">「${fmt(s.quote)}」</div>
+      ${s.action ? `<div class="act">${fmt(s.action)}</div>` : ''}</div>`).join('')
+    return pageChrome(`<h2 class="heading">${fmt(p.heading)}</h2>${intro}${scenes}`, p.label, idx, total, deck, style)
   }
   if (p.kind === 'quote') {
     return `<section class="page quotepage">
-      <div class="bigquote">「${esc(p.text)}」</div>
+      <div class="bigquote">「${fmt(p.text)}」</div>
       <div class="attr">— ${esc(p.attribution)}</div>
     </section>`
   }
   if (p.kind === 'closing') {
     const items = (p.takeaways ?? []).slice(0, 5).map((t, i) =>
-      `<div class="takeaway"><div class="n">${String(i + 1).padStart(2, '0')}</div><div class="t">${esc(t)}</div></div>`).join('')
-    const foot = p.footer ? `<p class="intro" style="margin-top:8mm">${esc(p.footer)}</p>` : ''
-    return pageChrome(`<h2 class="heading">${esc(p.heading)}</h2>${items}${foot}`, p.label ?? 'TAKEAWAYS', idx, total, deck, style)
+      `<div class="takeaway"><div class="n">${String(i + 1).padStart(2, '0')}</div><div class="t">${fmt(t)}</div></div>`).join('')
+    const foot = p.footer ? `<p class="intro" style="margin-top:8mm">${fmt(p.footer)}</p>` : ''
+    return pageChrome(`<h2 class="heading">${fmt(p.heading)}</h2>${items}${foot}`, p.label ?? 'TAKEAWAYS', idx, total, deck, style)
   }
   return ''
 }
@@ -449,7 +512,7 @@ addEventListener('keydown',e=>{
 
 function markReveals(html) {
   // Tag the major blocks inside each page for staggered entrance.
-  return html.replace(/class="(seclabel|kicker|cover-title|cover-en|lede|heading|intro|statgrid|darkpanel|cards|scene|bigquote|attr|takeaway|metas|masthead|cover-block)/g,
+  return html.replace(/class="(seclabel|kicker|cover-title|cover-en|lede|heading|intro|statgrid|darkpanel|cards|scene|bigquote|attr|takeaway|metas|masthead|cover-block|flow|cmp|verdict)/g,
     'class="reveal $1')
 }
 
