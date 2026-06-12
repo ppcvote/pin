@@ -2,6 +2,7 @@
   "name": "ultra-pin",
   "version": "0.1.0",
   "description": "Pin — Ultra Lab's open AI platform. Channel-agnostic skills runtime + MCP server.",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "bin": {

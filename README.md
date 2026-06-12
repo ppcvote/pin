@@ -1,7 +1,8 @@
 # Pin
 
-> Determinism-first consumer runtime for [Anthropic Agent Skills](https://agentskills.io/specification). Drop a `SKILL.md` and your SaaS product gains a button-driven LINE / Telegram interface. Built by [Ultra Lab](https://ultralab.tw).
+> Determinism-first consumer runtime for [Anthropic Agent Skills](https://agentskills.io/specification). Drop a `SKILL.md` and your SaaS product gains a button-driven LINE / Telegram interface. By the author of the AVS standard, contributor to Cisco mcp-scanner — built at [Ultra Lab](https://ultralab.tw).
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Pin Skill Spec](https://img.shields.io/badge/Pin%20Skill-Spec-2DD4BF)](./PIN_SKILL_SPEC.md)
 [![Direction Doc](https://img.shields.io/badge/Direction-Doc-D4AF37)](./PIN_DIRECTION.md)
 
@@ -108,7 +109,11 @@ The action shows up in `/menu`, becomes an MCP tool, gets exposed to Agent Mode 
 
 ## License
 
-Source-available, Pin-Personal license — free for personal use; contact for commercial. The Pin runtime is the moat, the spec extensions are gifts back to the community (see [proposals/](./proposals/)).
+The Pin runtime is [MIT](./LICENSE) — use it, fork it, ship your product on it, commercially or otherwise. No strings.
+
+What we charge for is the **hosted/cloud version** (the n8n model): we run Pin for you — LINE OA, tunnels, webhooks, uptime, upgrades — so your product gets the messaging surface without operating any of it. Self-hosting from this repo is and stays free.
+
+The spec extensions (`metadata.pin`, see [proposals/](./proposals/)) are gifts back to the Agent Skills community.
 
 ---
 
