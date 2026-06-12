@@ -6,6 +6,8 @@
 [![Pin Skill Spec](https://img.shields.io/badge/Pin%20Skill-Spec-2DD4BF)](./PIN_SKILL_SPEC.md)
 [![Direction Doc](https://img.shields.io/badge/Direction-Doc-D4AF37)](./PIN_DIRECTION.md)
 
+> **Honest status note:** self-hosting from this repo works today; the hosted/cloud version is still in internal dogfooding and **not open for sign-ups yet**.
+
 ## What this is
 
 Pin is a runtime that consumes Anthropic's Agent Skills standard — but optimized for an audience the spec wasn't originally tuned for: **end users on messaging apps in Taiwan and Hong Kong** (LINE-first, then Telegram). Drop a `SKILL.md` into `skills/` and:
@@ -112,7 +114,7 @@ The action shows up in `/menu`, becomes an MCP tool, gets exposed to Agent Mode 
 
 The Pin runtime is [MIT](./LICENSE) — use it, fork it, ship your product on it, commercially or otherwise. No strings.
 
-What we charge for is the **hosted/cloud version** (the n8n model): we run Pin for you — LINE OA, tunnels, webhooks, uptime, upgrades — so your product gets the messaging surface without operating any of it. Self-hosting from this repo is and stays free.
+What we charge for is the **hosted/cloud version** (the n8n model): we run Pin for you — LINE OA, tunnels, webhooks, uptime, upgrades — so your product gets the messaging surface without operating any of it. The hosted version is not open for sign-ups yet (internal dogfooding). Self-hosting from this repo is and stays free.
 
 The spec extensions (`metadata.pin`, see [proposals/](./proposals/)) are gifts back to the Agent Skills community.
 
