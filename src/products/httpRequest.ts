@@ -10,7 +10,7 @@ import { URL } from 'node:url'
  */
 export async function httpRequest<T = unknown>(
   url: string,
-  init: { method?: string; headers?: Record<string, string>; body?: string } = {}
+  init: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number } = {}
 ): Promise<T> {
   const u = new URL(url)
   const isHttps = u.protocol === 'https:'
@@ -44,7 +44,7 @@ export async function httpRequest<T = unknown>(
       })
     })
     req.on('error', reject)
-    req.setTimeout(15000, () => {
+    req.setTimeout(init.timeoutMs ?? 15000, () => {
       req.destroy(new Error('Request timeout'))
     })
     if (init.body) req.write(init.body)

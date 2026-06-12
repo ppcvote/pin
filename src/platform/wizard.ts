@@ -133,11 +133,16 @@ async function executeAndMaybePreview(user: UserRecord, skill: Skill, action: Ac
     return { kind: 'error', text: `${action.label} 失敗 😢\n${result.error ?? 'unknown'}` }
   }
 
-  // No preview → done
+  // No preview → done. Carry the action's follow-up/choice buttons through —
+  // a result like a download link lives in followUps, not the text.
   if (!action.preview) {
     user.wizard = undefined
     await saveUser(user)
-    const out: WizardOutcome = { kind: 'done', text: result.rendered ?? '✅ 完成' }
+    const buttons: WizardButton[] = [
+      ...(result.followUps ?? []).map(f => ({ text: f.text, callback_data: f.callback_data, url: f.url })),
+      ...(result.choices ?? []).map(c => ({ text: c.text, callback_data: c.callback_data })),
+    ]
+    const out: WizardOutcome = { kind: 'done', text: result.rendered ?? '✅ 完成', buttons: buttons.length ? buttons : undefined }
     return out
   }
 

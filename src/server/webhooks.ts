@@ -5,6 +5,7 @@ import { render } from '../platform/template.js'
 import { deliverWithRetry } from '../runtime/deliver.js'
 import { consumeBindingToken } from '../platform/binding.js'
 import { createBindToken } from '../storage/bindTokens.js'
+import { shortenCallback } from '../runtime/callbackRefs.js'
 import { findSkill } from '../platform/registry.js'
 import { readByName } from '../runtime/tempStore.js'
 import type { Channel, Button } from '../channels/types.js'
@@ -86,8 +87,7 @@ function renderButton(b: any, skillId: string, scope: any): Button {
     const argsEntries = Object.entries(b.args ?? {}).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(render(v as string, scope))}`)
     let cb = `a:${skillId}:${b.action}`
     if (argsEntries.length) cb += `?${argsEntries.join('&')}`
-    if (Buffer.byteLength(cb) > 64) cb = cb.slice(0, 64)
-    return { text: render(b.label, scope), callback_data: cb }
+    return { text: render(b.label, scope), callback_data: shortenCallback(cb) }
   }
   return { text: render(b.label, scope), callback_data: 'm:root' }
 }
@@ -108,7 +108,9 @@ export function startWebhookServer(channels: Channel[]): http.Server {
     // Used by LINE image messaging (it can't accept raw bytes, needs an HTTPS URL).
     // Random filenames + 30-min TTL provide adequate URL-as-secret protection;
     // the path-traversal guard sits inside readByName.
-    const imgMatch = req.method === 'GET' && req.url?.match(/^\/image\/([a-z0-9.]+)$/i)
+    // Match on pathname only — cache-busting query strings (?v=) must not 404.
+    const imgPath = (req.url ?? '').split('?')[0]
+    const imgMatch = req.method === 'GET' && imgPath.match(/^\/image\/([a-z0-9._-]+)$/i)
     if (imgMatch) {
       const blob = readByName(imgMatch[1])
       if (!blob) {

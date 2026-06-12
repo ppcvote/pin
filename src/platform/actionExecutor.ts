@@ -114,7 +114,8 @@ async function callApi(api: ApiSpec, args: Record<string, any>): Promise<any> {
     finalUrl = `${url}${url.includes('?') ? '&' : '?'}${qs.toString()}`
   }
 
-  return httpRequest<any>(finalUrl, { method: api.method, headers, body })
+  const timeoutMs = Math.min(Math.max(api.timeout_s ?? 15, 1), 120) * 1000
+  return httpRequest<any>(finalUrl, { method: api.method, headers, body, timeoutMs })
 }
 
 export interface RenderedChoice {

@@ -29,6 +29,9 @@ export interface ApiSpec {
   auth?: string  // e.g. "bearer:MT_API_KEY"
   body?: Record<string, any>
   query?: Record<string, string>
+  /** Request timeout in seconds (default 15, capped 1-120). For slow
+   *  product endpoints like generative renders. */
+  timeout_s?: number
 }
 
 export interface ChoiceSpec {

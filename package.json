@@ -15,7 +15,8 @@
     "mcp": "node dist/mcp/server.js",
     "mcp:dev": "tsx src/mcp/server.ts",
     "test": "node --env-file=.env --test test/smoke.test.mjs",
-    "mock:ug": "node scripts/mock-ug-server.mjs"
+    "mock:ug": "node scripts/mock-ug-server.mjs",
+    "slides": "node --env-file=.env scripts/slides-server.mjs"
   },
   "dependencies": {
     "@line/bot-sdk": "^11.0.1",

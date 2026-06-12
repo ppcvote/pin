@@ -21,10 +21,17 @@ import { createBindToken, redeemBindToken, peekBindToken } from '../dist/storage
 bootRegistry()
 const skills = allSkills()
 
-test('three live skills are registered', () => {
-  assert.equal(skills.length, 3)
+test('four live skills are registered', () => {
+  assert.equal(skills.length, 4)
   const ids = skills.map(s => s.id).sort()
-  assert.deepEqual(ids, ['mindthread', 'udhouse', 'ultragrowth'])
+  assert.deepEqual(ids, ['mindthread', 'slides', 'udhouse', 'ultragrowth'])
+})
+
+test('slides skill: make_deck wizard args + generous timeout', () => {
+  const f = findAction('slides', 'make_deck')
+  assert.deepEqual(f.action.args.map(a => a.name), ['style', 'topic', 'notes'])
+  assert.equal(f.action.args[0].options.length, 2)
+  assert.ok((f.action.api.timeout_s ?? 0) > 60, 'generative render needs a long timeout')
 })
 
 test('every skill has icon + primary_color (spec: recommended)', () => {
