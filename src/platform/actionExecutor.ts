@@ -1,6 +1,7 @@
 import { httpRequest } from '../products/httpRequest.js'
 import { render } from './template.js'
 import { readTempBlob } from '../runtime/tempStore.js'
+import { shortenCallback } from '../runtime/callbackRefs.js'
 import type { ActionDef, ApiSpec, Skill, ChoiceSpec } from './types.js'
 
 /** Resolve a tmp:<id> blob reference into a base64 data URL for JSON bodies. */
@@ -48,12 +49,9 @@ function buildChoices(
     // Pin callback format: a:<skill>:<action>?args
     let cb = `a:${skillId}:${choices.callback_action}`
     if (argsEncoded) cb += `?${argsEncoded}`
-    // TG limit: 64 bytes — truncate if needed
-    if (Buffer.byteLength(cb) > 64) {
-      console.warn(`[choices] callback_data exceeds 64 bytes (${cb.length}): ${cb}`)
-      cb = cb.slice(0, 64)
-    }
-    out.push({ text: text.slice(0, 40), callback_data: cb })
+    // TG caps callback_data at 64 bytes — oversized payloads go through
+    // the server-side indirection instead of being corrupted by truncation.
+    out.push({ text: text.slice(0, 40), callback_data: shortenCallback(cb) })
   }
   return out
 }
@@ -185,8 +183,7 @@ export async function executeAction(
           const enc = Object.entries(forwardedArgs).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')
           let cb = `a:${skill.id}:${fu.action}`
           if (enc) cb += `?${enc}`
-          if (Buffer.byteLength(cb) > 64) cb = cb.slice(0, 64)
-          followUps.push({ text: label.slice(0, 40), callback_data: cb })
+          followUps.push({ text: label.slice(0, 40), callback_data: shortenCallback(cb) })
         }
         for (const fu of action.respond.follow_up_urls ?? []) {
           const url = render(fu.url, scope)

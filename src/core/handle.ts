@@ -9,6 +9,7 @@ import { createBindingToken } from '../platform/binding.js'
 import { buildAgentCardData, renderAgentCardText } from '../platform/agentCard.js'
 import { incrementStat, incrementAgentStat } from '../runtime/stats.js'
 import { redeemBindToken, peekBindToken } from '../storage/bindTokens.js'
+import { resolveCallback } from '../runtime/callbackRefs.js'
 import { saveUser } from '../storage/jsonStore.js'
 import { reportBound } from '../runtime/flywheelReporter.js'
 import { agentRoute, isAgentModeEnabled } from '../brain/agentRouter.js'
@@ -108,6 +109,17 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
   // Stored as the jsonStore filename directly — channel prefix prevents collisions.
   const userKey = `${msg.channelId}:${msg.userId}`
   let user = await ensureUser(userKey, msg.userDisplayName, msg.userHandle)
+
+  // Resolve callback indirection (`cb:<hash>` → full callback) before ANY
+  // routing — including the wizard branch below, which must see the real
+  // `wz:` prefix or it would mis-cancel an active wizard.
+  if (msg.callback?.startsWith('cb:')) {
+    const full = resolveCallback(msg.callback)
+    if (!full) {
+      return { text: '⌛ 這個選單放太久過期了, 請重新操作一次', buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
+    }
+    msg = { ...msg, callback: full }
+  }
 
   // ── Active wizard takes priority — intercept text + wizard callbacks ──
   if (user.wizard) {

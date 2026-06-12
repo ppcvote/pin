@@ -23,14 +23,22 @@ function parseSkillFile(content: string): { fm: ParsedFrontmatter; body: string 
   return { fm, body }
 }
 
-function validateSkill(skill: Skill): string[] {
+function validateSkill(skill: Skill, fm: ParsedFrontmatter, skillDir: string): string[] {
   const errs: string[] = []
   if (!skill.name) errs.push('frontmatter.name missing')
   if (skill.name && !/^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$/.test(skill.name) && skill.name.length > 1) {
     errs.push(`frontmatter.name "${skill.name}" violates naming rules`)
   }
+  // Spec parity with skills-ref: no consecutive hyphens; name must match the
+  // parent directory name (NFKC-normalized comparison, matching the
+  // reference validator's behavior).
+  if (skill.name?.includes('--')) errs.push(`frontmatter.name "${skill.name}" contains consecutive hyphens`)
+  if (skill.name && skill.name.normalize('NFKC') !== skillDir.normalize('NFKC')) {
+    errs.push(`frontmatter.name "${skill.name}" must match directory name "${skillDir}"`)
+  }
   if (!skill.description) errs.push('frontmatter.description missing')
   if (skill.description && skill.description.length > 1024) errs.push('description exceeds 1024 chars')
+  if (fm.compatibility && fm.compatibility.length > 500) errs.push('compatibility exceeds 500 chars')
 
   if (skill.pin) {
     if (!skill.pin.actions || !Array.isArray(skill.pin.actions) || skill.pin.actions.length === 0) {
@@ -128,7 +136,7 @@ export function loadSkill(skillDir: string): Skill {
     pin: pinExt,
   }
 
-  const errs = validateSkill(skill)
+  const errs = validateSkill(skill, fm, skillDir)
   if (errs.length > 0) {
     throw new Error(`Invalid skill ${skillDir}:\n  - ${errs.join('\n  - ')}`)
   }

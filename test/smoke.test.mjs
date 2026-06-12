@@ -143,6 +143,51 @@ test('bind flow: unknown token gets one generic failure message', async () => {
   assert.ok(r.text.includes('已失效'), 'unknown token → generic failure, no reason disclosed')
 })
 
+// ── Callback indirection (TG 64-byte cap — no more truncation/dropping) ──
+
+test('callback refs: short callbacks pass through untouched', async () => {
+  const { shortenCallback, resolveCallback } = await import('../dist/runtime/callbackRefs.js')
+  assert.equal(shortenCallback('s:mindthread'), 's:mindthread')
+  assert.equal(resolveCallback('s:mindthread'), 's:mindthread')
+})
+
+test('callback refs: oversized callback round-trips via cb:<hash>', async () => {
+  const { shortenCallback, resolveCallback } = await import('../dist/runtime/callbackRefs.js')
+  const long = `a:mindthread:get_account?account_id=${'x'.repeat(80)}`
+  const short = shortenCallback(long)
+  assert.ok(short.startsWith('cb:'), 'oversized callback should become a cb: ref')
+  assert.ok(Buffer.byteLength(short) <= 64, 'ref must fit the 64-byte cap')
+  assert.equal(resolveCallback(short), long, 'ref must resolve back to the full callback')
+  // Deterministic: same content → same ref (store does not grow on re-render)
+  assert.equal(shortenCallback(long), short)
+})
+
+test('callback refs: unknown ref resolves to null; handler replies menu-expired', async () => {
+  const { resolveCallback } = await import('../dist/runtime/callbackRefs.js')
+  assert.equal(resolveCallback('cb:deadbeefdeadbeef'), null)
+  const { handlePinMessage } = await import('../dist/core/handle.js')
+  const uid = 'TEST_CBREF_' + Date.now()
+  const r = await handlePinMessage({ channelId: 'tg', userId: uid, userDisplayName: 't', callback: 'cb:deadbeefdeadbeef' })
+  assert.ok(r.text.includes('過期'), 'stale ref should get the menu-expired reply')
+})
+
+test('callback refs: indirect wizard callback still routes into the active wizard', async () => {
+  const { shortenCallback } = await import('../dist/runtime/callbackRefs.js')
+  const { handlePinMessage } = await import('../dist/core/handle.js')
+  const { loadUser } = await import('../dist/storage/jsonStore.js')
+  const uid = 'TEST_CBREF_WZ_' + Date.now()
+  // Start the post wizard (account select step)
+  await handlePinMessage({ channelId: 'tg', userId: uid, userDisplayName: 't', callback: 'a:mindthread:post' })
+  let user = await loadUser('tg:' + uid)
+  assert.ok(user?.wizard, 'wizard should be active')
+  // Tap an indirect wz: callback — must NOT cancel the wizard
+  const short = shortenCallback(`wz:account_id:${'y'.repeat(70)}`, 10)
+  assert.ok(short.startsWith('cb:'))
+  await handlePinMessage({ channelId: 'tg', userId: uid, userDisplayName: 't', callback: short })
+  user = await loadUser('tg:' + uid)
+  assert.ok(user?.wizard, 'indirect wz: callback must not be mis-read as non-wizard navigation')
+})
+
 test('LINE follow event (/follow) includes bind-recovery hint', async () => {
   const { handlePinMessage } = await import('../dist/core/handle.js')
   const uid = 'TEST_FOLLOW_' + Date.now()

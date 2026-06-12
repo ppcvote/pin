@@ -21,6 +21,7 @@ import { render } from './template.js'
 import { saveTempBlob } from '../runtime/tempStore.js'
 import type { InboundImage } from '../channels/types.js'
 import type { ActionDef, ArgSpec, Skill } from './types.js'
+import { shortenCallback } from '../runtime/callbackRefs.js'
 
 export type WizardButton = { text: string; callback_data?: string; url?: string }
 
@@ -79,8 +80,9 @@ async function promptForArg(skill: Skill, action: ActionDef, arg: ArgSpec, args:
     const buttons: WizardButton[] = []
     for (const opt of arg.options) {
       if (!opt.value || !opt.label) continue
-      const cb = `wz:${arg.name}:${encodeURIComponent(opt.value)}`
-      if (Buffer.byteLength(cb) > 64) continue
+      // Oversized values (TG 64-byte cap) go through callback indirection —
+      // previously they were silently dropped from the menu.
+      const cb = shortenCallback(`wz:${arg.name}:${encodeURIComponent(opt.value)}`)
       buttons.push({ text: opt.label.slice(0, 40), callback_data: cb })
     }
     buttons.push(NAV_BTN())
@@ -100,8 +102,7 @@ async function promptForArg(skill: Skill, action: ActionDef, arg: ArgSpec, args:
       const text = arg.display_key
         ? String(item?.[arg.display_key] ?? value).slice(0, 40)
         : value.slice(0, 40)
-      const cb = `wz:${arg.name}:${encodeURIComponent(value)}`
-      if (Buffer.byteLength(cb) > 64) continue
+      const cb = shortenCallback(`wz:${arg.name}:${encodeURIComponent(value)}`)
       buttons.push({ text, callback_data: cb })
     }
     buttons.push(NAV_BTN())
