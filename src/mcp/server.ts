@@ -63,6 +63,10 @@ let toolCount = 0
 for (const skill of allSkills()) {
   if (!skill.pin) continue
   for (const action of skill.pin.actions) {
+    // PIN_SKILL_SPEC visibility: "hidden" = not in menus NOR exposed via MCP.
+    // Money-moving confirm actions (e.g. domain register_confirmed) rely on
+    // this so the only path to them is a human tapping the ✅ preview key.
+    if (action.visibility === 'hidden') continue
     const toolName = `pin_${skill.id}_${action.id}`
     const description = `${skill.name}: ${action.description ?? action.label}`
     const inputSchema = argsToZod(action.args)
@@ -90,7 +94,7 @@ server.tool(
   async () => {
     const skills = allSkills()
     const out = skills.map(s => {
-      const acts = (s.pin?.actions ?? []).map(a => `  · ${a.id} — ${a.label}`).join('\n')
+      const acts = (s.pin?.actions ?? []).filter(a => a.visibility !== 'hidden').map(a => `  · ${a.id} — ${a.label}`).join('\n')
       return `${s.pin?.icon ?? '•'} **${s.name}** — ${s.description}\n${acts}`
     }).join('\n\n')
     return { content: [{ type: 'text', text: `Pin (${skills.length} skills):\n\n${out}` }] }
