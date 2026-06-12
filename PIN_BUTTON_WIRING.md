@@ -52,7 +52,7 @@ Pin 用這支 key 驗你產品的合法性。設定:
 
 ```
 .env (你產品的後端)
-PIN_BIND_BASE = https://celebs-speeds-cosmetic-serving.trycloudflare.com
+PIN_BIND_BASE = https://pin.quartz.tw
                 # ⚠️ 這個 URL 會換,先以 Min Yi 告知為準
 PIN_PRODUCT_API_KEY = dev_secret_for_pin_testing_123
                 # ⚠️ 這個是 dev key,production 用 Min Yi 給的真實 key
