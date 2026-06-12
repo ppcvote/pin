@@ -49,14 +49,14 @@ metadata:
             notes: "{notes}"
         respond:
           template: |
-            ✅ 《{{data.title}}》排版完成 — {{data.pages}} 頁
+            ✅ 《{{data.title}}》完成 — {{data.pages}} 頁
 
-            ⏳ 下載連結 30 分鐘內有效, 請盡快存檔。
+            🔗 線上版可以直接轉傳給別人看, 連結 7 天有效。
           follow_up_urls:
-            - label: ⬇️ 下載 PDF
+            - label: 🔗 開啟簡報
+              url: "{{data.html_url}}"
+            - label: ⬇️ PDF 版
               url: "{{data.pdf_url}}"
-            - label: 👀 看第 1 頁
-              url: "{{data.preview_url}}"
 ---
 
 # Slides skill

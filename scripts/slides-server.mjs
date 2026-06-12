@@ -20,7 +20,7 @@
 
 import http from 'node:http'
 import https from 'node:https'
-import { writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { writeFileSync, mkdirSync, existsSync, readdirSync, statSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
@@ -31,11 +31,24 @@ const GEMINI_KEY = process.env.GEMINI_API_KEY
 const GEMINI_MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash'
 const PUBLIC_URL = (process.env.PIN_PUBLIC_URL ?? 'http://localhost:3000').replace(/\/$/, '')
 const TMP = join(process.cwd(), 'data', 'tmp')
+const DECKS = join(process.cwd(), 'data', 'decks')
+const DECK_TTL_DAYS = 7
 const CHROME = process.env.CHROME_PATH ?? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
 
 if (!API_KEY) { console.error('[slides] SLIDES_API_KEY missing'); process.exit(1) }
 if (!GEMINI_KEY) { console.error('[slides] GEMINI_API_KEY missing'); process.exit(1) }
 if (!existsSync(TMP)) mkdirSync(TMP, { recursive: true })
+if (!existsSync(DECKS)) mkdirSync(DECKS, { recursive: true })
+
+function cleanupOldDecks() {
+  const cutoff = Date.now() - DECK_TTL_DAYS * 86400_000
+  try {
+    for (const f of readdirSync(DECKS)) {
+      const p = join(DECKS, f)
+      try { if (statSync(p).mtimeMs < cutoff) unlinkSync(p) } catch {}
+    }
+  } catch {}
+}
 
 // ── Abuse guards (the bot has no user allowlist, so the service self-limits) ──
 // Daily cap protects the LLM quota; the render lock serializes Chrome
@@ -72,7 +85,7 @@ const SCHEMA_DOC = `{
   "meta": { "label1": "value1", "label2": "value2", "label3": "value3" },
   "pages": [
     { "kind": "stats", "label": "章節標籤", "heading": "頁標題", "intro": "一兩句導言(可選)",
-      "stats": [ { "value": "81.6", "unit": "B USD", "label": "總營收", "note": "補充一句(可選)" } ],
+      "stats": [ { "value": "81.6", "unit": "B USD", "label": "總營收", "note": "補充一句(可選)", "num": 81.6 } ],
       "panel": { "title": "深色面板標題(可選)", "paras": ["段落1", "段落2"] } },
     { "kind": "points", "label": "章節標籤", "heading": "頁標題", "intro": "導言(可選)",
       "cards": [ { "title": "卡片標題", "body": "卡片內文(2-4句)" } ] },
@@ -105,6 +118,7 @@ function buildPrompt(style, topic, notes) {
     `   stats 頁必須同時附 panel(2-3 段);script 頁給 2-3 個 scene、quote 要長到可以照念;`,
     `   closing 給 4-5 條 takeaways、每條兩短句。半空的頁面是失敗的頁面。`,
     `3. pages 順序自選,但最後一頁必須是 closing。stats 最多 4 個數字;素材裡沒有可靠數字就不要用 stats 頁。`,
+    `   stats 的 num 是純數字(畫圖表用):只有同組數字互相可比較(同單位同量級)時才提供,否則省略。`,
     `4. meta 放 3 個鍵值對,鍵用英文大寫單詞(SERIES/DATE/FOR/SECTOR 等),DATE 一律用 ${today}。`,
   ].join('\n')
 }
@@ -190,6 +204,10 @@ function researchCSS() {
   .statcard .sv { font-family:${FONT_SERIF}; font-size:24pt; color:#1F2733; }
   .statcard .sv .unit { font-size:11pt; color:#C0492F; margin-left:1.5mm; }
   .statcard .sn { font-size:8.5pt; color:#6B7280; margin-top:2mm; line-height:1.5; }
+  .statrow { display:flex; justify-content:space-between; align-items:baseline; border-bottom:1px solid #E5DFD0; padding:3.5mm 0; }
+  .statrow .sl { font-size:9.5pt; color:#4A5160; }
+  .statrow .sv { font-family:${FONT_SERIF}; font-size:17pt; color:#1F2733; }
+  .statrow .sv .unit { font-size:9.5pt; color:#C0492F; margin-left:1.5mm; }
   .darkpanel { background:#1B2433; color:#EDE8DC; padding:8mm 9mm; flex:1.15; }
   .darkpanel .dt { font-size:13pt; font-weight:700; margin-bottom:4mm; line-height:1.5; }
   .darkpanel .dt .accent { color:#E08A6D; }
@@ -299,15 +317,20 @@ function pageChrome(inner, label, idx, total, deck, style) {
 function renderPage(p, idx, total, deck, style) {
   const intro = p.intro ? `<p class="intro">${esc(p.intro)}</p>` : ''
   if (p.kind === 'stats') {
-    const stats = (p.stats ?? []).slice(0, 4).map(s => `
-      <div class="statcard"><div class="sk">${esc(s.label)}</div>
+    const chart = svgBars(p.stats, style)
+    // With a chart, big stat cards would duplicate the bars AND overflow the
+    // page — switch to the reference deck's compact table rows instead.
+    const stats = (p.stats ?? []).slice(0, 4).map(s => chart && style !== 'ops'
+      ? `<div class="statrow"><div class="sl">${esc(s.label)}</div>
+         <div class="sv">${esc(s.value)}${s.unit ? `<span class="unit">${esc(s.unit)}</span>` : ''}</div></div>`
+      : `<div class="statcard"><div class="sk">${esc(s.label)}</div>
       <div class="sv">${esc(s.value)}${s.unit ? `<span class="unit">${esc(s.unit)}</span>` : ''}</div>
       ${s.note ? `<div class="sn">${esc(s.note)}</div>` : ''}</div>`).join('')
     const panel = p.panel ? `<div class="darkpanel"><div class="dt">${esc(p.panel.title)}</div>
       ${(p.panel.paras ?? []).map(t => `<p>${esc(t)}</p>`).join('')}</div>` : ''
     const innerBody = style === 'ops'
-      ? `<div class="statgrid">${stats}</div>${panel}`
-      : `<div class="statgrid"><div class="statcol">${stats}</div>${panel}</div>`
+      ? `<div class="statgrid">${stats}</div>${chart}${panel}`
+      : `<div class="statgrid"><div class="statcol">${stats}${chart}</div>${panel}</div>`
     return pageChrome(`<h2 class="heading">${esc(p.heading)}</h2>${intro}${innerBody}`, p.label, idx, total, deck, style)
   }
   if (p.kind === 'points') {
@@ -336,6 +359,31 @@ function renderPage(p, idx, total, deck, style) {
   return ''
 }
 
+// — SVG bar chart: deterministic, drawn by us from LLM-supplied numbers —
+
+function svgBars(stats, style) {
+  const usable = (stats ?? []).filter(s => typeof s.num === 'number' && isFinite(s.num) && s.num >= 0)
+  if (usable.length < 2) return ''
+  const max = Math.max(...usable.map(s => s.num))
+  if (max <= 0) return ''
+  const accent = style === 'ops' ? '#C8332B' : '#C0492F'
+  const track = style === 'ops' ? '#1E1E22' : '#EDE7DA'
+  const labelCol = style === 'ops' ? '#A8A296' : '#6B7280'
+  const valueCol = style === 'ops' ? '#F2EEE6' : '#1F2733'
+  const rowH = 46
+  const H = usable.length * rowH + 8
+  const rows = usable.map((s, i) => {
+    const y = i * rowH
+    const w = Math.max(2, Math.round((s.num / max) * 100))
+    return `
+    <text x="0" y="${y + 14}" font-family="Consolas,monospace" font-size="11" letter-spacing="1.5" fill="${labelCol}">${esc(s.label).toUpperCase()}</text>
+    <rect x="0" y="${y + 22}" width="100%" height="10" fill="${track}"/>
+    <rect class="bar" x="0" y="${y + 22}" width="${w}%" height="10" fill="${accent}"/>
+    <text x="100%" y="${y + 14}" text-anchor="end" font-family="Georgia,serif" font-size="15" fill="${valueCol}">${esc(s.value)}${s.unit ? ` ${esc(s.unit)}` : ''}</text>`
+  }).join('')
+  return `<svg class="chart" viewBox="0 0 720 ${H}" width="100%" height="${H}" preserveAspectRatio="none" style="margin-top:6mm">${rows}</svg>`
+}
+
 function renderDeckHTML(deck, style) {
   const total = (deck.pages?.length ?? 0) + 1
   const pages = [renderCover(deck, style)]
@@ -344,6 +392,82 @@ function renderDeckHTML(deck, style) {
   return `<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="utf-8">
   <style>${style === 'ops' ? opsCSS() : researchCSS()}</style></head>
   <body>${pages.join('\n')}</body></html>`
+}
+
+// — Web deck: same sections, full-screen scroll + reveal animation + charts —
+
+function webCSS(style) {
+  const ops = style === 'ops'
+  const bg = ops ? '#0B0B0D' : '#FAF7F2'
+  const accent = ops ? '#C8332B' : '#C0492F'
+  return `
+  html { scroll-behavior:smooth; }
+  body { background:${bg}; }
+  .page { width:min(1080px, 94vw); min-height:100vh; height:auto; margin:0 auto;
+          padding:9vh 4vw; page-break-after:auto; display:flex; flex-direction:column; justify-content:center; }
+  .cover-foot { position:static; margin-top:10vh; }
+  .pageno, .footrule, .pagefoot { display:none; }
+  .progress { position:fixed; top:0; left:0; height:3px; width:0; background:${accent}; z-index:9; transition:width .15s linear; }
+  /* Progressive enhancement: hidden-until-revealed applies only once JS has
+     tagged <html class="js"> — no JS (crawlers, readers) sees everything. */
+  .js .reveal { opacity:0; transform:translateY(26px); transition:opacity .7s ease, transform .7s ease; }
+  .js .page.in .reveal { opacity:1; transform:none; }
+  .js .page.in .reveal:nth-child(2) { transition-delay:.12s } .js .page.in .reveal:nth-child(3) { transition-delay:.22s }
+  .js .page.in .reveal:nth-child(4) { transition-delay:.32s } .js .page.in .reveal:nth-child(5) { transition-delay:.42s }
+  .js .chart .bar { transform:scaleX(0); transform-origin:left; transition:transform 1s cubic-bezier(.2,.7,.2,1) .35s; }
+  .js .page.in .chart .bar { transform:scaleX(1); }
+  .hint { position:fixed; bottom:18px; right:22px; font-family:${FONT_MONO}; font-size:10px;
+          letter-spacing:.18em; color:${ops ? '#5E594F' : '#B5AE9D'}; text-transform:uppercase; z-index:9; }
+  @media (max-width:640px) {
+    .page { padding:7vh 5vw; }
+    .cover-title { font-size:30pt; } .cover-en { font-size:20pt; }
+    h2.heading { font-size:19pt; }
+    .statgrid, .metas { flex-direction:column; }
+    .card { flex:1 1 100%; }
+    .bigquote { font-size:15pt; }
+  }`
+}
+
+const WEB_JS = `
+<script>
+document.documentElement.classList.add('js');
+const pages=[...document.querySelectorAll('.page')];
+const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting)e.target.classList.add('in')}),{threshold:0.25});
+pages.forEach(p=>io.observe(p));
+setTimeout(()=>pages.forEach(p=>p.classList.add('in')),3000); // safety: never leave content hidden
+const bar=document.querySelector('.progress');
+addEventListener('scroll',()=>{const d=document.documentElement;bar.style.width=(d.scrollTop/(d.scrollHeight-d.clientHeight)*100)+'%'},{passive:true});
+addEventListener('keydown',e=>{
+  if(e.key!=='ArrowDown'&&e.key!=='ArrowRight'&&e.key!=='ArrowUp'&&e.key!=='ArrowLeft')return;
+  e.preventDefault();
+  const y=scrollY+innerHeight*0.5;
+  const idx=pages.findIndex(p=>p.offsetTop+p.offsetHeight>y);
+  const next=(e.key==='ArrowDown'||e.key==='ArrowRight')?Math.min(idx+1,pages.length-1):Math.max(idx-1,0);
+  pages[next].scrollIntoView({behavior:'smooth'});
+});
+</script>`
+
+function markReveals(html) {
+  // Tag the major blocks inside each page for staggered entrance.
+  return html.replace(/class="(seclabel|kicker|cover-title|cover-en|lede|heading|intro|statgrid|darkpanel|cards|scene|bigquote|attr|takeaway|metas|masthead|cover-block)/g,
+    'class="reveal $1')
+}
+
+function renderWebHTML(deck, style, previewUrl) {
+  const total = (deck.pages?.length ?? 0) + 1
+  const pages = [renderCover(deck, style)]
+  let i = 2
+  for (const p of deck.pages ?? []) { pages.push(renderPage(p, i, total, deck, style)); i++ }
+  return `<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${esc(deck.title)}</title>
+  <meta property="og:title" content="${esc(deck.title)}">
+  <meta property="og:description" content="${esc(deck.kicker ?? '')} · ${total} pages">
+  ${previewUrl ? `<meta property="og:image" content="${esc(previewUrl)}">` : ''}
+  <style>${style === 'ops' ? opsCSS() : researchCSS()}${webCSS(style)}</style></head>
+  <body><div class="progress"></div><div class="hint">scroll / ↓</div>
+  ${markReveals(pages.join('\n'))}
+  ${WEB_JS}</body></html>`
 }
 
 // ── Render pipeline ──────────────────────────────────────────────────────
@@ -397,24 +521,26 @@ const server = http.createServer(async (req, res) => {
     try {
       return await withRenderSlot(async () => {
         console.log(`[slides] deck start style=${style} topic="${topic.slice(0, 60)}"`)
+        cleanupOldDecks()
         const deck = await geminiGenerate(buildPrompt(style, topic, notes || '(無補充素材,僅就主題常識性展開,不要編造具體數據)'))
         const id = crypto.randomBytes(8).toString('hex')
-        const htmlPath = join(TMP, `deck_${id}.html`)
-        const pdfPath = join(TMP, `deck_${id}.pdf`)
-        const pngPath = join(TMP, `deck_${id}.png`)
-        writeFileSync(htmlPath, renderDeckHTML(deck, style), 'utf-8')
-        printPDF(htmlPath, pdfPath)
+        const printPath = join(TMP, `deck_${id}_print.html`)
+        const webPath = join(DECKS, `deck_${id}.html`)
+        const pdfPath = join(DECKS, `deck_${id}.pdf`)
+        const pngPath = join(DECKS, `deck_${id}.png`)
+        const previewUrl = `${PUBLIC_URL}/deck/deck_${id}.png`
+        writeFileSync(printPath, renderDeckHTML(deck, style), 'utf-8')
+        printPDF(printPath, pdfPath)
         const pageCount = previewPNG(pdfPath, pngPath)
-        // sidecars so Pin's /image/<name> endpoint serves correct mime
-        writeFileSync(`${pdfPath}.meta`, JSON.stringify({ mime: 'application/pdf' }), 'utf-8')
-        writeFileSync(`${pngPath}.meta`, JSON.stringify({ mime: 'image/png' }), 'utf-8')
+        writeFileSync(webPath, renderWebHTML(deck, style, previewUrl), 'utf-8')
         console.log(`[slides] deck done id=${id} pages=${pageCount} ms=${Date.now() - t0} (${dayCount}/${DAILY_CAP} today)`)
         return json(200, {
           id,
           title: deck.title,
           pages: pageCount,
-          pdf_url: `${PUBLIC_URL}/image/deck_${id}.pdf`,
-          preview_url: `${PUBLIC_URL}/image/deck_${id}.png`,
+          html_url: `${PUBLIC_URL}/deck/deck_${id}.html`,
+          pdf_url: `${PUBLIC_URL}/deck/deck_${id}.pdf`,
+          preview_url: previewUrl,
         })
       })
     } catch (err) {

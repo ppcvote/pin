@@ -1,5 +1,7 @@
 import http from 'node:http'
 import crypto from 'node:crypto'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { findWebhook } from '../platform/registry.js'
 import { render } from '../platform/template.js'
 import { deliverWithRetry } from '../runtime/deliver.js'
@@ -108,6 +110,32 @@ export function startWebhookServer(channels: Channel[]): http.Server {
     // Used by LINE image messaging (it can't accept raw bytes, needs an HTTPS URL).
     // Random filenames + 30-min TTL provide adequate URL-as-secret protection;
     // the path-traversal guard sits inside readByName.
+    // Generated decks (skills/slides) — shareable artifacts with a 7-day
+    // life, served from data/decks (slides-server owns cleanup).
+    const deckPath = (req.url ?? '').split('?')[0]
+    const deckMatch = req.method === 'GET' && deckPath.match(/^\/deck\/([a-z0-9._-]+)$/i)
+    if (deckMatch) {
+      const name = deckMatch[1]
+      const file = join(process.cwd(), 'data', 'decks', name)
+      const mime = name.endsWith('.html') ? 'text/html; charset=utf-8'
+        : name.endsWith('.pdf') ? 'application/pdf'
+        : name.endsWith('.png') ? 'image/png'
+        : null
+      if (!mime || name.includes('..') || !existsSync(file)) {
+        res.writeHead(404, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'deck_not_found_or_expired' }))
+        return
+      }
+      const data = readFileSync(file)
+      res.writeHead(200, {
+        'Content-Type': mime,
+        'Content-Length': data.length,
+        'Cache-Control': 'public, max-age=3600',
+      })
+      res.end(data)
+      return
+    }
+
     // Match on pathname only — cache-busting query strings (?v=) must not 404.
     const imgPath = (req.url ?? '').split('?')[0]
     const imgMatch = req.method === 'GET' && imgPath.match(/^\/image\/([a-z0-9._-]+)$/i)
