@@ -46,10 +46,27 @@ metadata:
           follow_up_urls:
             - label: 🔑 登入 Ultra Advisor
               url: "https://ultra-advisor.tw/"
+      - id: daily_quote
+        label: ✨ 每日金句
+        description: Fetch today's quote from ultra-advisor.tw — same quote the site shows (date-hash synced)
+        args: []
+        api:
+          method: GET
+          url: "https://ultra-advisor.tw/api/daily-quote"
+        respond:
+          template: |
+            ✨ 每日金句 · {{data.date}}
+
+            「{{data.text}}」
+
+            — Ultra Advisor
+          follow_up_urls:
+            - label: 🌐 開啟 Ultra Advisor
+              url: "https://ultra-advisor.tw/"
       # —— 預留（PPC 2026-06-13 指示）——
       # 未來在此擴充更多會員功能按鈕, 每個 = 一個 action:
-      #   - daily_quote 每日金句（等 ultra-advisor.tw 開 /api/daily-quote 公開端點;
-      #     自動化推播提案在 HQ, 等 PPC 裁示）
+      #   - 每日金句「自動推播」（不是按鈕, 是排程）: 等 Pin runtime 排程器,
+      #     端點已就緒（/api/daily-quote?date= 可預取）, 工單見 INBOX
       #   - 其他工具（退休規劃 / 房貸試算…）視會員需求逐顆加
 ---
 
