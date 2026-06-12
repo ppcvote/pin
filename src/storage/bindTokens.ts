@@ -25,6 +25,10 @@ export interface BindTokenEntry {
   createdAt: string
   expiresAt: string
   used: boolean
+  /** userKey that redeemed the token — lets the double-tap path reply
+   *  idempotently instead of "link expired" right after a success. */
+  usedBy?: string
+  usedAt?: string
   /** Product-supplied opaque payload, surfaced to the bind-welcome handler.
    *  Used by FLYWHEEL §2 to carry AVS before/after for the ultragrowth welcome. */
   meta?: Record<string, any>
@@ -46,7 +50,9 @@ function pruneExpired(store: Store): Store {
   const now = Date.now()
   const out: Store = {}
   for (const [k, v] of Object.entries(store)) {
-    if (!v.used && new Date(v.expiresAt).getTime() > now) out[k] = v
+    // Used tokens stay until expiry so a double-tap on the prefilled
+    // message can be recognized and answered idempotently.
+    if (new Date(v.expiresAt).getTime() > now) out[k] = v
   }
   return out
 }
@@ -70,14 +76,26 @@ export async function createBindToken(skillName: string, tenantKey: string, meta
 }
 
 /** Look up + atomically consume a token. Returns the entry on success, null otherwise. */
-export async function redeemBindToken(token: string): Promise<BindTokenEntry | null> {
+export async function redeemBindToken(token: string, userKey?: string): Promise<BindTokenEntry | null> {
   if (!token || token.length !== 32) return null
   const store = await loadStore()
   const entry = store[token]
   if (!entry || entry.used) return null
   if (new Date(entry.expiresAt).getTime() <= Date.now()) return null
   entry.used = true
+  entry.usedBy = userKey
+  entry.usedAt = new Date().toISOString()
   store[token] = entry
   await saveStore(store)
+  return entry
+}
+
+/** Inspect a token without consuming it (used or not). Null if unknown/expired. */
+export async function peekBindToken(token: string): Promise<BindTokenEntry | null> {
+  if (!token || token.length !== 32) return null
+  const store = await loadStore()
+  const entry = store[token]
+  if (!entry) return null
+  if (new Date(entry.expiresAt).getTime() <= Date.now()) return null
   return entry
 }

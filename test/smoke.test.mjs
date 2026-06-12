@@ -9,10 +9,14 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
+
+// Keep test binds out of the production flywheel metrics + dead-letter log.
+process.env.PIN_DISABLE_FLYWHEEL = '1'
+
 import { bootRegistry, allSkills, findAction } from '../dist/platform/registry.js'
 import { compileToolsForUser } from '../dist/brain/toolCompiler.js'
 import { render } from '../dist/platform/template.js'
-import { createBindToken, redeemBindToken } from '../dist/storage/bindTokens.js'
+import { createBindToken, redeemBindToken, peekBindToken } from '../dist/storage/bindTokens.js'
 
 bootRegistry()
 const skills = allSkills()
@@ -93,6 +97,57 @@ test('bind token: malformed input returns null', async () => {
   assert.equal(await redeemBindToken(''), null)
   assert.equal(await redeemBindToken('too-short'), null)
   assert.equal(await redeemBindToken('Z'.repeat(32)), null)  // 32 chars but no such token
+})
+
+test('bind token: used token stays peekable until expiry (double-tap support)', async () => {
+  const entry = await createBindToken('udhouse', 'peek-test')
+  await redeemBindToken(entry.token, 'line:PEEK_USER')
+  const peeked = await peekBindToken(entry.token)
+  assert.ok(peeked, 'used token should still be visible to peek')
+  assert.equal(peeked.used, true)
+  assert.equal(peeked.usedBy, 'line:PEEK_USER')
+})
+
+// ── §A bind UX (ONBOARDING 工單 1: error paths + first-message experience) ──
+
+test('bind flow: first bind welcomes without leaking tenantKey; double-tap is idempotent; rebind says so', async () => {
+  const { handlePinMessage } = await import('../dist/core/handle.js')
+  const uid = 'TEST_BIND_UX_' + Date.now()
+  const msg = (text) => ({ channelId: 'line', userId: uid, userDisplayName: 't', text })
+
+  // First bind
+  const t1 = await createBindToken('udhouse', 'tenant-secret-xyz')
+  const r1 = await handlePinMessage(msg(`bind ${t1.token}`))
+  assert.ok(r1.text.includes('已連接'), 'first bind should confirm connection')
+  assert.ok(!r1.text.includes('tenant-secret-xyz'), 'tenantKey must not leak to end users')
+
+  // Double-tap the same prefilled message → idempotent success, not "expired"
+  const r2 = await handlePinMessage(msg(`bind ${t1.token}`))
+  assert.ok(r2.text.includes('已連接'), 'double-tap should be answered idempotently')
+  assert.ok(!r2.text.includes('已失效'), 'double-tap must not show the expired error')
+
+  // Rebind with a fresh token (re-click from product page / device change)
+  const t2 = await createBindToken('udhouse', 'tenant-secret-xyz')
+  const r3 = await handlePinMessage(msg(`bind ${t2.token}`))
+  assert.ok(r3.text.includes('已重新連接'), 'rebind should be labeled as a re-connect')
+
+  // A stranger replaying the used token still gets the generic failure
+  const r4 = await handlePinMessage({ channelId: 'line', userId: uid + '_OTHER', userDisplayName: 'o', text: `bind ${t1.token}` })
+  assert.ok(r4.text.includes('已失效'), 'another user replaying a used token gets the generic failure')
+})
+
+test('bind flow: unknown token gets one generic failure message', async () => {
+  const { handlePinMessage } = await import('../dist/core/handle.js')
+  const uid = 'TEST_BIND_FAIL_' + Date.now()
+  const r = await handlePinMessage({ channelId: 'line', userId: uid, userDisplayName: 't', text: `bind ${'a'.repeat(32)}` })
+  assert.ok(r.text.includes('已失效'), 'unknown token → generic failure, no reason disclosed')
+})
+
+test('LINE follow event (/follow) includes bind-recovery hint', async () => {
+  const { handlePinMessage } = await import('../dist/core/handle.js')
+  const uid = 'TEST_FOLLOW_' + Date.now()
+  const r = await handlePinMessage({ channelId: 'line', userId: uid, userDisplayName: 't', text: '/follow' })
+  assert.ok(r.text.includes('再點一次'), 'follow welcome should guide deep-link users back to the product page')
 })
 
 test('mindthread post wizard expects ordered args', () => {

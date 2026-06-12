@@ -69,6 +69,9 @@ async function deadLetter(event: FlywheelEvent, lastError: string): Promise<void
  * Returns immediately on the caller's tick; sender runs detached.
  */
 export function reportEvent(event: FlywheelEvent): void {
+  // Escape hatch for tests/sandboxes — keeps fake binds out of the
+  // production flywheel metrics and the dead-letter log.
+  if (process.env.PIN_DISABLE_FLYWHEEL === '1') return
   void (async () => {
     const ok = await sendOnce(event)
     if (!ok) await deadLetter(event, 'send_failed')

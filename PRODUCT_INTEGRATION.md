@@ -68,6 +68,12 @@ Errors:
 | 401 | `{"error":"bad_product_api_key"}` | secret mismatch |
 | 404 | `{"error":"unknown_skill"}` | skill not loaded in Pin |
 | 403 | `{"error":"skill_does_not_support_binding"}` | skill has no webhooks declared |
+| 429 | `{"error":"rate_limited","retryAfterSeconds":3600}` | > 60 tokens/hour for this skill |
+
+Rate limit: **60 token issuances per hour per skill** (only authenticated
+requests count). If you hit it organically, batch your dashboard's button
+clicks less aggressively — a token should be minted per click, not per
+page load.
 
 ## 2. Compose the deep link
 
@@ -132,6 +138,22 @@ optimised — not the bookkeeping around it.
 - Token lifetime is 10 minutes, single-use. Don't log it.
 - If the user fails to redeem in time, issue a new one. There's no
   refund / reuse path.
+
+## 4b. Redemption edge cases (Pin handles these — for your support docs)
+
+- **Double-tap**: LINE keeps the prefilled message after sending; users
+  often send "bind {token}" twice. The second send gets an idempotent
+  "已連接" reply, not an error.
+- **Re-bind**: the same user clicking your dashboard button again (new
+  device, re-onboarding) gets a fresh token and a "已重新連接" reply;
+  their Pin-side settings survive. If the new token carries a different
+  `tenantKey`, the binding switches to it.
+- **Lost prefill**: a user who had to add the OA as a friend first may
+  lose the prefilled message. Pin's follow-event welcome tells them to
+  go back to your page and click the button again — make sure your
+  button mints a fresh token on every click.
+- **Expired/used/foreign token**: one generic "連結已失效" reply, no
+  reason disclosed.
 
 ## 5. Acceptance test
 

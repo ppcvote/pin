@@ -12,6 +12,20 @@ import type { LineChannel } from '../channels/line.js'
 
 const PORT = parseInt(process.env.PIN_HTTP_PORT ?? '3000', 10)
 
+// §A: /bind/token issuance is capped at 60/hour per skill (in-memory —
+// single-process runtime, resets on restart, which is acceptable here).
+const BIND_TOKEN_HOURLY_CAP = 60
+const bindTokenRate = new Map<string, { hourBucket: string; count: number }>()
+
+function bindTokenRateExceeded(skillName: string): boolean {
+  const hourBucket = new Date().toISOString().slice(0, 13)
+  const rl = bindTokenRate.get(skillName)
+  const count = rl?.hourBucket === hourBucket ? rl.count : 0
+  if (count >= BIND_TOKEN_HOURLY_CAP) return true
+  bindTokenRate.set(skillName, { hourBucket, count: count + 1 })
+  return false
+}
+
 interface InboundPayload {
   /** Pin user identifier — channel-qualified: "tg:781284060", "discord:abc" */
   pin_user_id: string
@@ -152,6 +166,14 @@ export function startWebhookServer(channels: Channel[]): http.Server {
         console.warn(`[bind/token] auth fail skill=${payload.skillName}`)
         res.writeHead(401, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'bad_product_api_key' }))
+        return
+      }
+      // Rate limit counts only authenticated requests, so a key-less
+      // attacker can't exhaust a legit product's quota.
+      if (bindTokenRateExceeded(payload.skillName)) {
+        console.warn(`[bind/token] rate-limited skill=${payload.skillName} (${BIND_TOKEN_HOURLY_CAP}/hr)`)
+        res.writeHead(429, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'rate_limited', retryAfterSeconds: 3600 }))
         return
       }
       const entry = await createBindToken(payload.skillName, payload.tenantKey, payload.meta)

@@ -221,8 +221,10 @@ export class LineChannel implements Channel {
       callback = event.postback.data
       replyToken = (event as any).replyToken
     } else if (event.type === 'follow') {
-      // User added the bot → treat like /start
-      text = '/start'
+      // User added the bot → welcome + bind-recovery hint (§A: the
+      // add-friend interstitial can swallow a product deep link's
+      // prefilled "bind <token>" message)
+      text = '/follow'
       replyToken = (event as any).replyToken
     } else {
       return

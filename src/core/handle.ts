@@ -8,7 +8,7 @@ import { startWizard, processWizardCallback, processWizardText, processWizardIma
 import { createBindingToken } from '../platform/binding.js'
 import { buildAgentCardData, renderAgentCardText } from '../platform/agentCard.js'
 import { incrementStat, incrementAgentStat } from '../runtime/stats.js'
-import { redeemBindToken } from '../storage/bindTokens.js'
+import { redeemBindToken, peekBindToken } from '../storage/bindTokens.js'
 import { saveUser } from '../storage/jsonStore.js'
 import { reportBound } from '../runtime/flywheelReporter.js'
 import { agentRoute, isAgentModeEnabled } from '../brain/agentRouter.js'
@@ -435,16 +435,36 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     await saveUser(u)
 
     const token = bindMatch[1].toLowerCase()
-    const entry = await redeemBindToken(token)
+    const entry = await redeemBindToken(token, userKey)
     if (!entry) {
+      // Double-tap: LINE keeps the prefilled message around, so users often
+      // send "bind <token>" twice. If THIS user already consumed this token
+      // and still holds the binding, answer idempotently instead of scaring
+      // them with "link expired" right after a successful bind.
+      const prior = await peekBindToken(token)
+      if (prior?.used && prior.usedBy === userKey && u.bindings?.[prior.skillName]) {
+        const skill = findSkill(prior.skillName)
+        if (skill) {
+          const icon = skill.pin?.icon ?? '•'
+          const view = skillMenu(skill.id)
+          return {
+            text: `✅ 已連接 ${icon} ${skill.name}, 不用再按一次囉`,
+            buttons: view ? withUnbindButton(view.buttons, skill.id, true) : undefined,
+            theme: { primaryColor: skill.pin?.primary_color, icon, title: skill.name },
+          }
+        }
+      }
       return { text: '🔒 連結已失效, 請回到產品頁面重新點擊' }
     }
     const skill = findSkill(entry.skillName)
     if (!skill) return { text: '🔒 連結已失效, 請回到產品頁面重新點擊' }
+    // Rebind (re-click from product page / device change): keep the flow
+    // silent-success but say so, and don't double-count the flywheel event.
+    const prevBinding = u.bindings?.[entry.skillName]
     u.bindings = { ...(u.bindings ?? {}), [entry.skillName]: { tenantKey: entry.tenantKey, boundAt: new Date().toISOString() } }
     await saveUser(u)
-    // Flywheel §3 — fire-and-forget pin_bound event
-    reportBound(userKey, entry.skillName)
+    // Flywheel §3 — fire-and-forget pin_bound event (first bind only)
+    if (!prevBinding) reportBound(userKey, entry.skillName)
     const icon = skill.pin?.icon ?? '•'
     const view = skillMenu(skill.id)
     const buttons = view ? withUnbindButton(view.buttons, skill.id, true) : undefined
@@ -473,8 +493,22 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       }
     }
 
+    // First-message experience (§A 工單): real customers see this, so no
+    // internal identifiers (tenantKey) — say what just happened + what's next.
+    const lines = [
+      prevBinding ? `✅ 已重新連接 ${icon} ${skill.name}` : `✅ 已連接 ${icon} ${skill.name}`,
+      '',
+    ]
+    if (prevBinding && prevBinding.tenantKey !== entry.tenantKey) {
+      lines.push('已切換到新的帳號連結。', '')
+    } else if (prevBinding) {
+      lines.push('你原本的設定與通知都還在。', '')
+    }
+    const eventCount = skill.pin?.webhooks?.length ?? 0
+    if (eventCount > 0) lines.push(`${skill.name} 的通知之後會直接推到這裡。`)
+    lines.push('用下面的選單馬上開始 ↓')
     return {
-      text: `✅ 已連接 ${icon} ${skill.name}\n\n（tenant: ${entry.tenantKey}）`,
+      text: lines.join('\n'),
       buttons,
       theme: { primaryColor: skill.pin?.primary_color, icon, title: skill.name },
     }
@@ -483,6 +517,14 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
   // Slash commands
   if (text === '/start') {
     return welcomeScreen(msg.userDisplayName)
+  }
+  // LINE follow event — same welcome + bind-recovery hint, because the
+  // add-friend interstitial can swallow the product deep link's prefilled
+  // "bind <token>" message.
+  if (text === '/follow') {
+    const w = welcomeScreen(msg.userDisplayName)
+    w.text += '\n\n🔗 從產品頁面點「用 LINE 管理」過來的嗎?\n加好友完成了, 請回到產品頁面**再點一次**那顆按鈕, 就會完成綁定。'
+    return w
   }
   if (text === '/menu') {
     const boundIds = Object.keys(user.bindings ?? {})
