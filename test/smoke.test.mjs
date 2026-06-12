@@ -143,6 +143,26 @@ test('bind flow: unknown token gets one generic failure message', async () => {
   assert.ok(r.text.includes('已失效'), 'unknown token → generic failure, no reason disclosed')
 })
 
+// ── Forward compatibility: standard Agent Skills without metadata.pin ──
+
+test('loader: parses a SKILL.md with UTF-8 BOM and no metadata.pin', async () => {
+  const { mkdirSync, writeFileSync, rmSync } = await import('node:fs')
+  const { loadSkill } = await import('../dist/platform/skillLoader.js')
+  const dir = 'zz-bom-fixture'
+  mkdirSync(`skills/${dir}`, { recursive: true })
+  try {
+    const content = '﻿---\nname: zz-bom-fixture\ndescription: A plain Agent Skill with a BOM and no pin extension.\n---\n\nProse instructions for an LLM agent.\n'
+    writeFileSync(`skills/${dir}/SKILL.md`, content, 'utf-8')
+    const skill = loadSkill(dir)
+    assert.equal(skill.name, 'zz-bom-fixture')
+    assert.ok(skill.description.includes('plain Agent Skill'))
+    assert.equal(skill.pin, undefined)
+    assert.ok(skill.body.includes('Prose instructions'))
+  } finally {
+    rmSync(`skills/${dir}`, { recursive: true, force: true })
+  }
+})
+
 // ── Callback indirection (TG 64-byte cap — no more truncation/dropping) ──
 
 test('callback refs: short callbacks pass through untouched', async () => {

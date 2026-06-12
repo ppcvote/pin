@@ -16,7 +16,10 @@ interface ParsedFrontmatter {
 }
 
 function parseSkillFile(content: string): { fm: ParsedFrontmatter; body: string } {
-  const m = content.match(FRONTMATTER_RE)
+  // Tolerate a UTF-8 BOM — Windows editors prepend U+FEFF, which would
+  // otherwise make the frontmatter regex reject a perfectly valid file.
+  // (The regex below contains the literal invisible U+FEFF character.)
+  const m = content.replace(/^﻿/, '').match(FRONTMATTER_RE)
   if (!m) throw new Error('SKILL.md must start with YAML frontmatter delimited by ---')
   const fm = parseYaml(m[1]) as ParsedFrontmatter
   const body = m[2] ?? ''

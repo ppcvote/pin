@@ -35,7 +35,24 @@ export function rootMenu(boundSkillIds: string[] = []): { title: string; buttons
 /** Skill action menu — primary actions one-per-row, secondary 2-per-row. */
 export function skillMenu(skillId: string): { title: string; buttons: InlineButton[][] } | null {
   const skill = findSkill(skillId)
-  if (!skill?.pin) return null
+  if (!skill) return null
+
+  // Forward compatibility (PIN_SKILL_SPEC): a standard Agent Skill without
+  // metadata.pin still gets a single-entry view instead of a dead end. It
+  // has no structured actions to render, so the honest offer is free text.
+  if (!skill.pin) {
+    return {
+      title: [
+        `• ${skill.name}`,
+        '',
+        skill.description.split('\n')[0].slice(0, 200),
+        '',
+        '這是標準 Agent Skill(沒有宣告 metadata.pin 選單),所以這裡沒有按鈕可按。',
+        '直接打字描述你想做的事,我會盡力路由;要長出完整選單,請 skill 作者補上 metadata.pin。',
+      ].join('\n'),
+      buttons: [[{ text: '⬅️ 返回', callback_data: 'm:root' }]],
+    }
+  }
 
   const primary = skill.pin.actions.filter(a => a.visibility === 'primary')
   const secondary = skill.pin.actions.filter(a => a.visibility === 'secondary')
