@@ -33,6 +33,24 @@ metadata:
               url: "https://ultra-advisor.tw/research/the-brain"
             - label: 📖 Vol.III 降落傘
               url: "https://ultra-advisor.tw/research/the-parachute"
+      - id: policy_checkup
+        label: 🩺 保單健診
+        description: Point members at Ultra Advisor's insurance checkup tool (lives inside the member dashboard, login required)
+        args: []
+        api:
+          method: GET
+          url: "https://ultra-advisor.tw/manifest.json"
+        respond:
+          template: |
+            🩺 保單健診是會員工具, 登入 Ultra Advisor 後在工具列開啟:
+          follow_up_urls:
+            - label: 🔑 登入 Ultra Advisor
+              url: "https://ultra-advisor.tw/"
+      # —— 預留（PPC 2026-06-13 指示）——
+      # 未來在此擴充更多會員功能按鈕, 每個 = 一個 action:
+      #   - daily_quote 每日金句（等 ultra-advisor.tw 開 /api/daily-quote 公開端點;
+      #     自動化推播提案在 HQ, 等 PPC 裁示）
+      #   - 其他工具（退休規劃 / 房貸試算…）視會員需求逐顆加
 ---
 
 # Advisor skill
