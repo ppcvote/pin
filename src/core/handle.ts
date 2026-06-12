@@ -44,24 +44,34 @@ function welcomeScreen(displayName: string): OutboundReply {
 }
 
 function helpScreen(): OutboundReply {
+  const agentOn = process.env.PIN_AGENT_MODE === 'true' || process.env.PIN_AGENT_MODE === '1'
   return {
     text: [
       '📖 Pin 指令一覽',
       '',
       '🔘 主操作:',
-      '  /menu — 開所有 skill 選單',
-      '  /start — 歡迎畫面',
+      '  /menu     開所有 skill 選單',
+      '  /start    歡迎畫面',
+      '  /card     看我的 Agent 卡 (含分享圖)',
+      '  /stats    本週 dogfood 數字 + Agent 決策分布',
+      '  /version  Pin runtime 版本資訊',
+      '  /help     這頁',
       '',
-      '💬 自然語言快速通道:',
-      '  「提醒我 30 分鐘後 X」',
-      '  「午餐 NT$120」',
-      '  「記一下: X」',
-      '  「列出我的提醒」',
+      `🤖 Agent Mode: ${agentOn ? 'ON ✅ 你可以直接打自然語言' : 'OFF · 走規則路由'}`,
+      '  例 (when ON):',
+      '    「看一下我的物件」     → 直接執行',
+      '    「這個月成效如何」     → 直接執行',
+      '    「幫我發文」          → 問你發到哪個帳號',
       '',
-      '🧩 給開發者:',
+      '🔗 綁定 (產品端 deep link):',
+      '  從產品後台點「📱 用 LINE 管理」→ 一鍵連接',
+      '  詳見 ultralab.tw/pin (即將上線)',
+      '',
+      '🧩 開發者:',
       '  Pin 跑在 SKILL.md 標準 (Anthropic Agent Skills)',
-      '  任何產品寫 SKILL.md 就可以接入',
+      '  任何產品寫 SKILL.md 就接入 LINE/TG/MCP',
       '  Spec: https://agentskills.io/specification',
+      '  Pin: https://github.com/ppcvote/pin',
     ].join('\n'),
     buttons: [[{ text: '🏠 回主選單', callback_data: 'm:root' }]],
   }
