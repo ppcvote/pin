@@ -198,7 +198,14 @@ export async function executeAction(
       return { ok: false, error: 'script execution not yet implemented (PR welcome)' }
     }
     if (action.handler) {
-      return { ok: false, error: 'handler execution not yet implemented (PR welcome)' }
+      // Dynamic import resolves to dist/skills/<skillId>.js at runtime.
+      // Using a variable intentionally — TypeScript yields `any`, which is correct here.
+      const mod = await import(`../skills/${skill.id}.js`) as Record<string, unknown>
+      const fn = mod[action.handler]
+      if (typeof fn !== 'function') {
+        return { ok: false, error: `handler "${action.handler}" not exported from skills/${skill.id}` }
+      }
+      return await fn(args) as ActionResult
     }
     return { ok: false, error: 'action has no api / script / handler' }
   } catch (err) {
