@@ -618,3 +618,113 @@ test('whatsapp inbound: parse interactive list_reply → callback', async () => 
   assert.equal(received.length, 1)
   assert.equal(received[0].callback, 'a:udhouse:list_listings')
 })
+
+// ── WhatsApp adapter Phase 2: 24-hour window state machine ───────────────────
+
+test('whatsapp window: last inbound < 24h → sendDirect uses plain text payload (not template)', async () => {
+  const { WhatsAppChannel, TEMPLATE_CATALOG } = await import('../dist/channels/whatsapp.js')
+  const { ensureUser, saveUser } = await import('../dist/storage/jsonStore.js')
+
+  const userId = '85211110001'
+  const userKey = `wa:${userId}`
+
+  // Record inbound 1 hour ago — window is open
+  const user = await ensureUser(userKey, 'WindowOpen')
+  user.wa_last_inbound = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+  await saveUser(user)
+
+  const captured = []
+  const origFetch = globalThis.fetch
+  globalThis.fetch = async (_url, opts) => {
+    captured.push(JSON.parse(opts.body))
+    return { ok: true, text: async () => '' }
+  }
+  try {
+    const ch = new WhatsAppChannel('phoneId', 'token-window-open')
+    await ch.sendDirect(userId, '視窗內推播')
+
+    assert.equal(captured.length, 1, 'exactly one API call')
+    assert.notEqual(captured[0].type, 'template', 'window open → must NOT use template')
+    assert.ok(
+      captured[0].type === 'text' || captured[0].type === 'interactive',
+      `expected text or interactive, got: ${captured[0].type}`,
+    )
+  } finally {
+    globalThis.fetch = origFetch
+  }
+})
+
+test('whatsapp window: last inbound 25h ago → sendDirect switches to template', async () => {
+  const { WhatsAppChannel, TEMPLATE_CATALOG } = await import('../dist/channels/whatsapp.js')
+  const { ensureUser, saveUser } = await import('../dist/storage/jsonStore.js')
+
+  const userId = '85211110002'
+  const userKey = `wa:${userId}`
+
+  // Record inbound 25 hours ago — window is closed
+  const user = await ensureUser(userKey, 'WindowClosed')
+  user.wa_last_inbound = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString()
+  await saveUser(user)
+
+  // Temporarily approve the placeholder template
+  const tpl = TEMPLATE_CATALOG[0]
+  const origStatus = tpl.status
+  tpl.status = 'approved'
+
+  const captured = []
+  const origFetch = globalThis.fetch
+  globalThis.fetch = async (_url, opts) => {
+    captured.push(JSON.parse(opts.body))
+    return { ok: true, text: async () => '' }
+  }
+  try {
+    const ch = new WhatsAppChannel('phoneId', 'token-window-closed')
+    await ch.sendDirect(userId, '視窗外推播')
+
+    assert.equal(captured.length, 1, 'exactly one API call')
+    assert.equal(captured[0].type, 'template', '25h after last inbound → must use template')
+    assert.equal(captured[0].template.name, tpl.name)
+  } finally {
+    globalThis.fetch = origFetch
+    tpl.status = origStatus
+  }
+})
+
+test('whatsapp window: no approved template → push goes to dead-letter, no silent drop', async () => {
+  const { WhatsAppChannel, TEMPLATE_CATALOG } = await import('../dist/channels/whatsapp.js')
+  const { ensureUser, saveUser, loadUser } = await import('../dist/storage/jsonStore.js')
+
+  const userId = '85211110003'
+  const userKey = `wa:${userId}`
+
+  // Record inbound 25 hours ago — window is closed
+  const user = await ensureUser(userKey, 'DeadLetter')
+  user.wa_last_inbound = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString()
+  await saveUser(user)
+
+  // All templates are pending (none approved)
+  const origStatuses = TEMPLATE_CATALOG.map(t => t.status)
+  TEMPLATE_CATALOG.forEach(t => { t.status = 'pending' })
+
+  const captured = []
+  const origFetch = globalThis.fetch
+  globalThis.fetch = async (_url, opts) => {
+    captured.push(JSON.parse(opts.body))
+    return { ok: true, text: async () => '' }
+  }
+  try {
+    const ch = new WhatsAppChannel('phoneId', 'token-dead-letter')
+    await ch.sendDirect(userId, '無 template 推播')
+
+    assert.equal(captured.length, 0, 'no API call when template is unavailable')
+
+    const updated = await loadUser(userKey)
+    assert.ok(updated?.failed_pushes?.length > 0, 'push must land in dead-letter queue, not silently dropped')
+    const entry = updated.failed_pushes[updated.failed_pushes.length - 1]
+    assert.equal(entry.channelId, 'whatsapp', 'dead-letter entry must be tagged whatsapp')
+    assert.ok(entry.lastError.includes('template'), 'error message must mention template routing')
+  } finally {
+    globalThis.fetch = origFetch
+    TEMPLATE_CATALOG.forEach((t, i) => { t.status = origStatuses[i] })
+  }
+})
