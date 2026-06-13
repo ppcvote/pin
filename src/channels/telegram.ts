@@ -1,5 +1,16 @@
 import { Telegraf } from 'telegraf'
-import type { Button, Channel, MessageHandler } from './types.js'
+import type { Button, Channel, MessageHandler, InboundImage } from './types.js'
+
+/** TG album (media_group) debounce buffer — collects photos from the same album. */
+const ALBUM_DEBOUNCE_MS = 1200
+const ALBUM_MAX_PHOTOS = 8
+
+type AlbumEntry = {
+  images: InboundImage[]
+  ctx: any
+  timer: ReturnType<typeof setTimeout>
+}
+const pendingAlbums = new Map<string, AlbumEntry>()
 
 /** Convert Pin generic Button to Telegraf's strict InlineKeyboardButton shape. */
 function toTgKeyboard(buttons: Button[][]): any[][] {
@@ -45,6 +56,65 @@ export class TelegramChannel implements Channel {
       await this.dispatch(ctx, { callback: data, isCallback: true })
     })
 
+    this.bot.on('photo', async (ctx) => {
+      if (ctx.chat.type !== 'private') return
+      const msg = ctx.message
+      const photos = msg.photo
+      if (!photos || photos.length === 0) return
+
+      // TG sends photos sorted smallest→largest; pick the largest that bots can access.
+      const best = photos[photos.length - 1]
+      let image: InboundImage
+      try {
+        const link = await ctx.telegram.getFileLink(best.file_id)
+        const res = await fetch(link.href)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const buf = Buffer.from(await res.arrayBuffer())
+        image = { data: buf, mime: 'image/jpeg' }
+      } catch (err) {
+        console.error('[tg photo download]', err)
+        try { await ctx.reply('照片下載失敗 😢，請重試') } catch {}
+        return
+      }
+
+      const mediaGroupId: string | undefined = (msg as any).media_group_id
+      if (mediaGroupId) {
+        const key = `${ctx.chat.id}:${mediaGroupId}`
+        const existing = pendingAlbums.get(key)
+        if (existing) {
+          clearTimeout(existing.timer)
+          existing.images.push(image)
+          if (existing.images.length >= ALBUM_MAX_PHOTOS) {
+            // Hit max — dispatch immediately without waiting for debounce
+            pendingAlbums.delete(key)
+            await this.dispatch(existing.ctx, { images: existing.images }).catch(e => console.error('[tg album dispatch]', e))
+            return
+          }
+          // Reset debounce window
+          existing.timer = setTimeout(async () => {
+            pendingAlbums.delete(key)
+            await this.dispatch(existing.ctx, { images: existing.images }).catch(e => console.error('[tg album dispatch]', e))
+          }, ALBUM_DEBOUNCE_MS)
+        } else {
+          // First photo of this album
+          const entry: AlbumEntry = {
+            images: [image],
+            ctx,
+            timer: setTimeout(async () => {
+              const e = pendingAlbums.get(key)
+              if (!e) return
+              pendingAlbums.delete(key)
+              await this.dispatch(e.ctx, { images: e.images }).catch(err => console.error('[tg album dispatch]', err))
+            }, ALBUM_DEBOUNCE_MS),
+          }
+          pendingAlbums.set(key, entry)
+        }
+      } else {
+        // Single photo (no album grouping) — dispatch immediately
+        await this.dispatch(ctx, { image })
+      }
+    })
+
     // Don't await — telegraf.launch() in long-polling mode resolves only when bot stops.
     // We just want to kick it off and let it run in the background.
     this.bot.launch().catch(err => console.error('[tg launch]', err))
@@ -71,7 +141,7 @@ export class TelegramChannel implements Channel {
 
   private async dispatch(
     ctx: any,
-    payload: { text?: string; callback?: string; isCallback?: boolean }
+    payload: { text?: string; callback?: string; isCallback?: boolean; image?: InboundImage; images?: InboundImage[] }
   ): Promise<void> {
     if (!this.handler) return
     const chat = ctx.chat
@@ -85,6 +155,8 @@ export class TelegramChannel implements Channel {
         userHandle: from.username,
         text: payload.text,
         callback: payload.callback,
+        image: payload.image,
+        images: payload.images,
         rawCtx: ctx,
       })
       if (!reply) return

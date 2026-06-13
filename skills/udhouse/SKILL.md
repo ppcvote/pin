@@ -64,13 +64,13 @@ metadata:
             label: 物件照片
             type: image
             input: attachment
-            placeholder: 拍一張物件主圖, 或從相簿選
+            placeholder: 可拍多張或選相簿（最多 8 張）
         api:
           method: POST
           url: "{UDH_BASE_URL}/api/v1/listings/from-photo"
           auth: bearer:UDH_API_KEY
           body:
-            image: "{image}"
+            images: "{image}"
         preview:
           template: |
             ✨ AI 從照片產出的物件草稿:

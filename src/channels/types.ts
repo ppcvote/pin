@@ -19,7 +19,8 @@ export interface InboundMessage {
   userHandle?: string       // optional @username
   text?: string             // free-form text (null if it's a button tap)
   callback?: string         // button callback_data (null if it's text)
-  image?: InboundImage      // photo/file upload from the user
+  image?: InboundImage      // single photo (LINE/WA, or TG single)
+  images?: InboundImage[]   // album (TG media_group) or multi-image batch delivery
   rawCtx?: unknown          // adapter-specific original message ctx (for edits etc.)
 }
 
