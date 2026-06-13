@@ -17,6 +17,12 @@ export interface QaResult {
 
 const RED_LINE_RE = /投資建議|法律建議|醫療建議|investment advice|legal advice|medical advice/i
 
+// 身分／能力類 meta 問題。知識庫不會有「你是誰」這種條目，punt 到「手頭沒資料」
+// 會讓助理顯得壞掉。用內建身分直接答（deterministic，不打 LLM、不碰知識庫事實）。
+const IDENTITY_RE = /你是誰|你係邊個|你叫(?:什麼|咩|甚麼)|你(?:是|係)(?:什麼|甚麼|咩)(?:嚟|來)?[?？]?$|你能做(?:什麼|啲咩)|你可以做(?:什麼|咩)|你會(?:什麼|咩|做咩)|你有(?:什麼|咩)功能|介紹(?:一下)?你自己|自我介紹|who\s+are\s+you|what\s+(?:are|can)\s+you/i
+const IDENTITY_ANSWER =
+  '我是 Ultra Lab 的 AI 助理 🦞 可以幫你了解我們的產品（UltraProbe AI 安全掃描、MindThread、Ultra Advisor 等）、回答產品問題，或開啟選單裡的小工具。想知道什麼直接問我就好。'
+
 export function loadKnowledge(knowledgeDir: string): KbEntry[] {
   if (!existsSync(knowledgeDir)) return []
   const entries: KbEntry[] = []
@@ -80,6 +86,14 @@ export async function ask(args: Record<string, any>, knowledgeDir?: string): Pro
     }
   }
 
+  if (IDENTITY_RE.test(question)) {
+    return {
+      ok: true,
+      rendered: IDENTITY_ANSWER,
+      followUps: [{ text: '🌐 ultralab.tw', url: 'https://ultralab.tw' }],
+    }
+  }
+
   const dir = knowledgeDir ?? join(process.cwd(), 'skills', 'qa', 'knowledge')
   const entries = loadKnowledge(dir)
   const hits = search(question, entries)
@@ -87,7 +101,7 @@ export async function ask(args: Record<string, any>, knowledgeDir?: string): Pro
   if (hits.length === 0) {
     return {
       ok: true,
-      rendered: '這個我手頭沒資料，可到 ultralab.tw 查詢更多資訊。',
+      rendered: '這個我手頭沒詳細資料 🙏 你可以問我 Ultra Lab 的產品（UltraProbe／MindThread／Ultra Advisor），或到 ultralab.tw 看更多。',
       followUps: [{ text: '🌐 ultralab.tw', url: 'https://ultralab.tw' }],
     }
   }
