@@ -64,8 +64,12 @@ function verifySignature(secretEnvName: string | undefined, bodyBuf: Buffer, hea
   }
   const expected = crypto.createHmac('sha256', secret).update(bodyBuf).digest('hex')
   const provided = headerSig.replace(/^sha256=/, '')
-  if (expected !== provided) {
-    console.error(`[webhook] sig mismatch: expected=${expected.slice(0,16)}... provided=${provided.slice(0,16)}... bytes=${bodyBuf.length}`)
+  // Timing-safe compare — equal-length Buffers required, so length-check first
+  // (a length mismatch is already a mismatch, and timingSafeEqual throws on it).
+  const expBuf = Buffer.from(expected, 'hex')
+  const provBuf = Buffer.from(provided, 'hex')
+  if (expBuf.length !== provBuf.length || !crypto.timingSafeEqual(expBuf, provBuf)) {
+    console.error(`[webhook] sig mismatch: bytes=${bodyBuf.length}`)
     return { ok: false, reason: 'bad_signature' }
   }
   return { ok: true }
