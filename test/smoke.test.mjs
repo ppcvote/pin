@@ -848,3 +848,44 @@ test('whatsapp webhook: POST wrong signature → 401', async () => {
     delete process.env.WHATSAPP_APP_SECRET
   }
 })
+
+// ── Admin gate (requires_admin skill visibility) ─────────────────────────────
+
+const { rootMenu } = await import('../dist/platform/menuRenderer.js')
+
+test('admin gate: rootMenu includes udhouse-admin when user is admin', () => {
+  // Pass udhouse-admin as an admin-granted skill
+  const { buttons } = rootMenu([], ['udhouse-admin'])
+  const callbackDatas = buttons.flat().map(b => b.callback_data)
+  assert.ok(
+    callbackDatas.some(d => d === 's:udhouse-admin'),
+    'admin user must see udhouse-admin entry in root menu'
+  )
+})
+
+test('admin gate: rootMenu excludes udhouse-admin when user is not admin', () => {
+  // Empty adminGrantedSkillIds → no admin grants
+  const { buttons } = rootMenu([], [])
+  const callbackDatas = buttons.flat().map(b => b.callback_data)
+  assert.ok(
+    !callbackDatas.some(d => d === 's:udhouse-admin'),
+    'non-admin user must NOT see udhouse-admin entry in root menu'
+  )
+})
+
+test('admin gate: probeAdminAccess returns false on network failure (fail-safe non-admin)', async () => {
+  const { probeAdminAccess } = await import('../dist/products/udhouse.js')
+  const origBase = process.env.UDH_BASE_URL
+  // Point at a port guaranteed to refuse connections immediately
+  process.env.UDH_BASE_URL = 'http://127.0.0.1:1'
+  try {
+    const result = await probeAdminAccess()
+    assert.equal(result, false, 'network failure must return false (fail-safe to non-admin)')
+  } finally {
+    if (origBase !== undefined) {
+      process.env.UDH_BASE_URL = origBase
+    } else {
+      delete process.env.UDH_BASE_URL
+    }
+  }
+})
