@@ -229,7 +229,8 @@ export function startWebhookServer(channels: Channel[], port: number = PORT): ht
         return
       }
       const entry = await createBindToken(payload.skillName, payload.tenantKey, payload.meta)
-      console.log(`[bind/token] issued skill=${entry.skillName} tenant=${entry.tenantKey} ttl_min=10${payload.meta ? ' (with meta)' : ''}`)
+      // tenantKey is a per-tenant secret — log only its presence, never the value.
+      console.log(`[bind/token] issued skill=${entry.skillName} tenant=${entry.tenantKey ? 'set' : 'none'} ttl_min=10${payload.meta ? ' (with meta)' : ''}`)
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ token: entry.token, expiresAt: entry.expiresAt }))
       return

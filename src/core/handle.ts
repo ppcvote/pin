@@ -764,6 +764,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
   if (result.via === 'llm' || result.via === 'fallback') {
     await incrementStat(userKey, 'llmFallbacks')
   }
-  console.log(`[route] user=${userKey} via=${result.via} skill=${result.skill?.id ?? 'none'} text="${text.slice(0, 60)}"`)
+  // Log routing metadata only — never the message body (may contain PII).
+  console.log(`[route] user=${userKey} via=${result.via} skill=${result.skill?.id ?? 'none'} text_len=${text.length}`)
   return { text: result.reply }
 }
