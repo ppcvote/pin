@@ -21,10 +21,10 @@ import { createBindToken, redeemBindToken, peekBindToken } from '../dist/storage
 bootRegistry()
 const skills = allSkills()
 
-test('eight live skills are registered', () => {
-  assert.equal(skills.length, 8)
+test('nine live skills are registered', () => {
+  assert.equal(skills.length, 9)
   const ids = skills.map(s => s.id).sort()
-  assert.deepEqual(ids, ['advisor', 'domain', 'mindthread', 'qa', 'slides', 'udhouse', 'udhouse-admin', 'ultragrowth'])
+  assert.deepEqual(ids, ['admin-hub', 'advisor', 'domain', 'mindthread', 'qa', 'slides', 'udhouse', 'udhouse-admin', 'ultragrowth'])
 })
 
 test('slides skill: make_deck wizard args + generous timeout', () => {
