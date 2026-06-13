@@ -64,6 +64,8 @@ metadata:
 
             👉 做成圖卡轉發給客戶：
           follow_up_urls:
+            # 選單動作走公開 /api/daily-quote（不知道是誰）→ 用一般連結（需登入）。
+            # 免登入只在「每日推播」那條（後端知道 uid、簽得出 auth_url）。
             - label: 🎨 做今日金句圖卡
               url: "https://ultra-advisor.tw/?tab=share"
             - label: 🌐 開啟 Ultra Advisor
@@ -91,7 +93,7 @@ metadata:
             👉 做成圖卡，一鍵轉發給你的客戶 👇
           buttons:
             - label: 🎨 做今日金句圖卡
-              url: "https://ultra-advisor.tw/?tab=share"
+              url: "{{data.auth_url}}"
             - label: 🌐 開啟 Ultra Advisor
               url: "https://ultra-advisor.tw/"
 ---
