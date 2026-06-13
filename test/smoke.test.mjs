@@ -384,3 +384,29 @@ test('bind error path 2: duplicate bind (already bound, fresh token, same tenant
   assert.equal(Object.keys(user?.bindings ?? {}).length, 1, 'must have exactly one binding, not accumulated')
   assert.equal(user?.bindings?.udhouse?.tenantKey, 'tenant-dup-test', 'correct tenantKey stored')
 })
+
+test('bind error path 3: device rebind (new token, different tenantKey) → old binding replaced, switch noted', async () => {
+  const { handlePinMessage } = await import('../dist/core/handle.js')
+  const { loadUser } = await import('../dist/storage/jsonStore.js')
+
+  const uid = 'TEST_REBIND_DEV_' + Date.now()
+  const msg = (text) => ({ channelId: 'line', userId: uid, userDisplayName: 't', text })
+
+  // Original device / tenant A
+  const t1 = await createBindToken('udhouse', 'tenant-device-a')
+  await handlePinMessage(msg(`bind ${t1.token}`))
+  const userAfterFirst = await loadUser('line:' + uid)
+  assert.equal(userAfterFirst?.bindings?.udhouse?.tenantKey, 'tenant-device-a', 'original tenantKey active')
+
+  // New device / tenant B — product issues a fresh token under a different tenant
+  const t2 = await createBindToken('udhouse', 'tenant-device-b')
+  const r = await handlePinMessage(msg(`bind ${t2.token}`))
+  assert.ok(r.text.includes('已重新連接'), 'device rebind must confirm re-connection')
+  assert.ok(r.text.includes('切換'), 'must note the tenant/account switch for transparency')
+  assert.ok(!r.text.includes('tenant-device'), 'internal tenantKey must not appear in user-facing message')
+
+  // Old binding must be replaced — new tenantKey active, no accumulation
+  const userAfterRebind = await loadUser('line:' + uid)
+  assert.equal(userAfterRebind?.bindings?.udhouse?.tenantKey, 'tenant-device-b', 'new tenantKey must be active')
+  assert.equal(Object.keys(userAfterRebind?.bindings ?? {}).length, 1, 'old binding replaced, not accumulated')
+})
