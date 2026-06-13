@@ -3,6 +3,7 @@ import { route as legacyRoute } from '../router.js'
 import { appendHistory } from '../brain/memory.js'
 import { findAction, findSkill, allSkills } from '../platform/registry.js'
 import { rootMenu, skillMenu, parseCallback } from '../platform/menuRenderer.js'
+import { probeAdminAccess } from '../products/udhouse.js'
 import { executeAction } from '../platform/actionExecutor.js'
 import { startWizard, processWizardCallback, processWizardText, processWizardImage, type WizardOutcome } from '../platform/wizard.js'
 import { createBindingToken } from '../platform/binding.js'
@@ -20,9 +21,42 @@ const NAV_ROW = (skillId?: string): Button[] => skillId
   ? [{ text: `⬅️ 返回`, callback_data: `s:${skillId}` }, { text: '🏠 主選單', callback_data: 'm:root' }]
   : [{ text: '🏠 主選單', callback_data: 'm:root' }]
 
+/**
+ * Probe admin access for any requires_admin skills that haven't been checked yet.
+ * Result is persisted to user.admin_probe_cache so subsequent messages are instant.
+ * Fail-safe: any probe error → isAdmin=false (non-admin).
+ */
+async function ensureAdminProbeCache(user: import('../storage/jsonStore.js').UserRecord, userKey: string): Promise<void> {
+  const adminSkills = allSkills().filter(s => s.pin?.requires_admin)
+  if (adminSkills.length === 0) return
+  let dirty = false
+  for (const skill of adminSkills) {
+    if (user.admin_probe_cache?.[skill.id] !== undefined) continue
+    let isAdmin = false
+    try {
+      isAdmin = await probeAdminAccess()
+    } catch {
+      isAdmin = false
+    }
+    if (!user.admin_probe_cache) user.admin_probe_cache = {}
+    user.admin_probe_cache[skill.id] = { isAdmin, checkedAt: new Date().toISOString() }
+    dirty = true
+    console.log(`[admin-gate] probed skill=${skill.id} isAdmin=${isAdmin} user=${userKey}`)
+  }
+  if (dirty) await saveUser(user)
+}
+
+/** Derive admin-granted skill IDs from the cached probe results on the user record. */
+function adminGrantsFromCache(user: import('../storage/jsonStore.js').UserRecord): string[] {
+  return Object.entries(user.admin_probe_cache ?? {})
+    .filter(([, v]) => v.isAdmin)
+    .map(([k]) => k)
+}
+
 /** Render the platform's main onboarding screen. */
-function welcomeScreen(displayName: string): OutboundReply {
-  const skills = allSkills()
+function welcomeScreen(displayName: string, adminGrants: string[] = []): OutboundReply {
+  const adminGranted = new Set(adminGrants)
+  const skills = allSkills().filter(s => !s.pin?.requires_admin || adminGranted.has(s.id))
   const skillNames = skills.map(s => `${s.pin?.icon ?? '•'} ${s.name}`).join('  ')
   const text = [
     `👋 Hi ${displayName}, 我是 **Pin**`,
@@ -110,6 +144,11 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
   const userKey = `${msg.channelId}:${msg.userId}`
   let user = await ensureUser(userKey, msg.userDisplayName, msg.userHandle)
 
+  // Admin gate: probe requires_admin skills once per user; cache result in user record.
+  // Fast no-op after first probe. Fail-safe: any error → non-admin.
+  await ensureAdminProbeCache(user, userKey)
+  const adminGrants = adminGrantsFromCache(user)
+
   // Resolve callback indirection (`cb:<hash>` → full callback) before ANY
   // routing — including the wizard branch below, which must see the real
   // `wz:` prefix or it would mis-cancel an active wizard.
@@ -165,12 +204,15 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
 
     if (parsed.kind === 'root') {
       const boundIds = Object.keys(user.bindings ?? {})
-      const { title, buttons } = rootMenu(boundIds)
+      const { title, buttons } = rootMenu(boundIds, adminGrants)
       return { text: title, buttons, edit: true, theme: { title: 'Pin' } }
     }
     if (data === 'explore') {
+      const adminGranted = new Set(adminGrants)
       const boundIds = new Set(Object.keys(user.bindings ?? {}))
-      const unbound = allSkills().filter(s => !boundIds.has(s.id))
+      const unbound = allSkills()
+        .filter(s => !s.pin?.requires_admin || adminGranted.has(s.id))
+        .filter(s => !boundIds.has(s.id))
       if (unbound.length === 0) {
         return { text: '所有 skill 都已連接 🎉', buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
       }
@@ -528,19 +570,19 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
 
   // Slash commands
   if (text === '/start') {
-    return welcomeScreen(msg.userDisplayName)
+    return welcomeScreen(msg.userDisplayName, adminGrants)
   }
   // LINE follow event — same welcome + bind-recovery hint, because the
   // add-friend interstitial can swallow the product deep link's prefilled
   // "bind <token>" message.
   if (text === '/follow') {
-    const w = welcomeScreen(msg.userDisplayName)
+    const w = welcomeScreen(msg.userDisplayName, adminGrants)
     w.text += '\n\n🔗 從產品頁面點「用 LINE 管理」過來的嗎?\n加好友完成了, 請回到產品頁面**再點一次**那顆按鈕, 就會完成綁定。'
     return w
   }
   if (text === '/menu') {
     const boundIds = Object.keys(user.bindings ?? {})
-    const { title, buttons } = rootMenu(boundIds)
+    const { title, buttons } = rootMenu(boundIds, adminGrants)
     return { text: title, buttons }
   }
   if (text === '/card') {

@@ -31,11 +31,26 @@ import { z } from 'zod'
 import { bootRegistry, allSkills } from '../platform/registry.js'
 import { initSkillThreatScan } from '../platform/skillThreatScan.js'
 import { executeAction } from '../platform/actionExecutor.js'
+import { probeAdminAccess } from '../products/udhouse.js'
 import type { ArgSpec } from '../platform/types.js'
 
 // Load skills before registering — ATR threat scan armed first
 await initSkillThreatScan()
 bootRegistry()
+
+// Admin gate: probe once at startup; skills with requires_admin are only
+// registered if the server's UDH_API_KEY has admin access. Fail-safe: error → not admin.
+const adminGrantedSkillIds = new Set<string>()
+for (const skill of allSkills()) {
+  if (!skill.pin?.requires_admin) continue
+  try {
+    const isAdmin = await probeAdminAccess()
+    if (isAdmin) adminGrantedSkillIds.add(skill.id)
+  } catch {
+    // fail-safe: probe error → non-admin
+  }
+  console.error(`[pin-mcp] admin probe skill=${skill.id} granted=${adminGrantedSkillIds.has(skill.id)}`)
+}
 
 const server = new McpServer({
   name: 'pin',
@@ -64,6 +79,8 @@ function summarizeResult(result: { ok: boolean; rendered?: string; raw?: any; er
 let toolCount = 0
 for (const skill of allSkills()) {
   if (!skill.pin) continue
+  // Admin gate: skip requires_admin skills when the server key lacks admin access
+  if (skill.pin.requires_admin && !adminGrantedSkillIds.has(skill.id)) continue
   for (const action of skill.pin.actions) {
     // PIN_SKILL_SPEC visibility: "hidden" = not in menus NOR exposed via MCP.
     // Money-moving confirm actions (e.g. domain register_confirmed) rely on
@@ -94,7 +111,7 @@ server.tool(
   'List all Ultra Lab products available through Pin, with their actions.',
   {},
   async () => {
-    const skills = allSkills()
+    const skills = allSkills().filter(s => !s.pin?.requires_admin || adminGrantedSkillIds.has(s.id))
     const out = skills.map(s => {
       const acts = (s.pin?.actions ?? []).filter(a => a.visibility !== 'hidden').map(a => `  · ${a.id} — ${a.label}`).join('\n')
       return `${s.pin?.icon ?? '•'} **${s.name}** — ${s.description}\n${acts}`
