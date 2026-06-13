@@ -129,6 +129,9 @@ export interface WebhookSpec {
 export interface PinExtension {
   version: string
   icon?: string
+  /** Human-friendly menu label. `name` must match the dir (lowercase, hyphenated);
+   *  display_name lets the menu show e.g. "Ultra Advisor" instead of "advisor". */
+  display_name?: string
   primary_color?: string
   secrets?: string[]
   actions: ActionDef[]

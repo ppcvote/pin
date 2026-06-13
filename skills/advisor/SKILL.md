@@ -10,6 +10,7 @@ metadata:
   pin:
     version: "1.0"
     icon: 📚
+    display_name: Ultra Advisor
     primary_color: "#0F766E"
     actions:
       - id: open_research

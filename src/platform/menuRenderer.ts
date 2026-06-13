@@ -27,7 +27,7 @@ export function rootMenu(
   const myskills = showAll ? visibleSkills : visibleSkills.filter(s => bound.has(s.id))
   for (const s of myskills) {
     const icon = s.pin?.icon ?? '•'
-    buttons.push([{ text: `${icon} ${s.name}`, callback_data: `s:${s.id}` }])
+    buttons.push([{ text: `${icon} ${s.pin?.display_name ?? s.name}`, callback_data: `s:${s.id}` }])
   }
 
   // 🧭 探索 — show only when there are un-bound visible skills to surface
@@ -82,7 +82,7 @@ export function skillMenu(skillId: string): { title: string; buttons: InlineButt
   }
   buttons.push([{ text: '⬅️ 返回', callback_data: 'm:root' }])
   const icon = skill.pin.icon ?? ''
-  const title = `${icon} ${skill.name}\n\n${skill.description.split('\n')[0].slice(0, 200)}`
+  const title = `${icon} ${skill.pin.display_name ?? skill.name}\n\n${skill.description.split('\n')[0].slice(0, 200)}`
   return { title, buttons }
 }
 
