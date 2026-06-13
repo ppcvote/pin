@@ -4,12 +4,24 @@ import { readTempBlob } from '../runtime/tempStore.js'
 import { shortenCallback } from '../runtime/callbackRefs.js'
 import type { ActionDef, ApiSpec, Skill, ChoiceSpec } from './types.js'
 
-/** Resolve a tmp:<id> blob reference into a base64 data URL for JSON bodies. */
+/**
+ * Resolve tmp:<id> blob reference(s) for JSON bodies.
+ * Comma-separated multi-refs (stored by multi-image wizard) always return an array,
+ * so the body key should be plural (e.g. "images") to match backend array handling.
+ * Single ref also returns a single-element array for consistency with plural key.
+ */
 function maybeResolveBlob(value: any): any {
   if (typeof value !== 'string' || !value.startsWith('tmp:')) return value
-  const blob = readTempBlob(value)
-  if (!blob) return value
-  return `data:${blob.mime};base64,${blob.data.toString('base64')}`
+  const refs = value.split(',').map(r => r.trim()).filter(r => r.startsWith('tmp:'))
+  if (refs.length === 0) return value
+  const dataUrls = refs
+    .map(ref => {
+      const blob = readTempBlob(ref)
+      if (!blob) return null
+      return `data:${blob.mime};base64,${blob.data.toString('base64')}`
+    })
+    .filter((u): u is string => u !== null)
+  return dataUrls.length === 0 ? value : dataUrls
 }
 
 /** Resolve a path like "data.accounts" on the response object. */

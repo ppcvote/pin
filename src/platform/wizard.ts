@@ -36,6 +36,9 @@ export type WizardOutcome =
 
 const NAV_BTN = (): WizardButton => ({ text: '❌ 取消', callback_data: 'wz:cancel' })
 
+/** Max photos per image arg — mirrors backend MAX_PHOTOS. */
+const MAX_WIZARD_PHOTOS = 8
+
 function pathLookup(obj: any, path: string): any {
   if (!path) return obj
   const parts = path.split('.')
@@ -118,7 +121,18 @@ async function promptForArg(skill: Skill, action: ActionDef, arg: ArgSpec, args:
   // Image arg
   if (arg.type === 'image' || arg.input === 'attachment') {
     const hint = arg.placeholder ? `\n💡 ${arg.placeholder}` : ''
-    return { kind: 'prompt_text', text: `${header}📸 ${arg.label ?? arg.name} — 直接傳一張照片給我${hint}`, buttons: [NAV_BTN()] }
+    const pendingCount = state.pending_images?.length ?? 0
+    if (pendingCount > 0) {
+      return {
+        kind: 'prompt_text',
+        text: `${header}📸 已收到 ${pendingCount} 張照片。可繼續傳，或按「開始分析」${hint}`,
+        buttons: [
+          { text: `📊 開始分析 (${pendingCount} 張)`, callback_data: 'wz:img:commit' },
+          NAV_BTN(),
+        ],
+      }
+    }
+    return { kind: 'prompt_text', text: `${header}📸 ${arg.label ?? arg.name} — 可一次傳多張（相簿），或傳單張${hint}`, buttons: [NAV_BTN()] }
   }
 
   return { kind: 'error', text: `arg "${arg.name}" 沒有可收集的 UI 方式 (缺 from_action 或 input)` }
@@ -247,6 +261,22 @@ export async function processWizardCallback(user: UserRecord, callbackData: stri
     return { kind: 'cancelled', text: '已取消' }
   }
 
+  // Commit accumulated single-image uploads (LINE/WA path)
+  if (callbackData === 'wz:img:commit') {
+    if (!state.pending_images?.length) {
+      user.wizard = undefined
+      await saveUser(user)
+      return { kind: 'error', text: '沒有收到照片 — 請先傳一張照片' }
+    }
+    const currentArg = action.args[state.argIdx]
+    if (!currentArg || (currentArg.type !== 'image' && currentArg.input !== 'attachment')) {
+      user.wizard = undefined
+      await saveUser(user)
+      return { kind: 'error', text: '目前步驟不需要照片' }
+    }
+    return commitPendingImages(user, state, skill, action, currentArg)
+  }
+
   // Confirm — run the confirm_action with collected args + preview content
   if (callbackData === 'wz:confirm' && action.preview) {
     const confirmAction = skill.pin?.actions.find(a => a.id === action.preview!.confirm_action)
@@ -293,7 +323,24 @@ export async function processWizardCallback(user: UserRecord, callbackData: stri
   return null
 }
 
-/** Process an inbound image while wizard is active and the current arg expects an image. */
+/** Commit accumulated pending_images to collected and advance the wizard. */
+async function commitPendingImages(user: UserRecord, state: import('../storage/jsonStore.js').WizardState, skill: Skill, action: ActionDef, arg: ArgSpec): Promise<WizardOutcome> {
+  const refs = state.pending_images ?? []
+  state.collected[arg.name] = refs.join(',')
+  if (!state.collected_labels) state.collected_labels = {}
+  state.collected_labels[arg.name] = `📸 ${refs.length} 張`
+  state.pending_images = undefined
+  state.argIdx += 1
+  user.wizard = state
+  await saveUser(user)
+  return continueWizard(user, skill, action, state)
+}
+
+/**
+ * Process a single inbound image while wizard is active.
+ * Accumulates into pending_images (LINE/WA path).
+ * User must tap「開始分析」(wz:img:commit) or reach MAX_WIZARD_PHOTOS to trigger extraction.
+ */
 export async function processWizardImage(user: UserRecord, image: InboundImage): Promise<WizardOutcome | null> {
   if (!user.wizard) return null
   const state = user.wizard
@@ -309,11 +356,62 @@ export async function processWizardImage(user: UserRecord, image: InboundImage):
   const currentArg = action.args[state.argIdx]
   if (currentArg.type !== 'image' && currentArg.input !== 'attachment') return null
 
-  // Persist the blob to scratch space; the wizard state only carries a tmp:<...> ref.
+  // Accumulate into pending_images (do not advance argIdx until commit)
   const ref = saveTempBlob(image.data, image.mime)
-  state.collected[currentArg.name] = ref
+  if (!state.pending_images) state.pending_images = []
+  state.pending_images.push(ref)
+
+  const count = state.pending_images.length
+  if (count >= MAX_WIZARD_PHOTOS) {
+    // Auto-commit at max
+    return commitPendingImages(user, state, skill, action, currentArg)
+  }
+
   if (!state.collected_labels) state.collected_labels = {}
-  state.collected_labels[currentArg.name] = `📸 ${image.mime} · ${(image.data.length / 1024).toFixed(0)} KB`
+  state.collected_labels[currentArg.name] = `📸 ${count} 張`
+  user.wizard = state
+  await saveUser(user)
+
+  return {
+    kind: 'prompt_text',
+    text: `📸 已收到 ${count} 張照片。可繼續傳，或按「開始分析」`,
+    buttons: [
+      { text: `📊 開始分析 (${count} 張)`, callback_data: 'wz:img:commit' },
+      NAV_BTN(),
+    ],
+  }
+}
+
+/**
+ * Process a batch of inbound images (TG album path).
+ * Commits all at once and advances the wizard immediately — no "done" button needed.
+ */
+export async function processWizardImages(user: UserRecord, images: InboundImage[]): Promise<WizardOutcome | null> {
+  if (!user.wizard) return null
+  const state = user.wizard
+  const found = findAction(state.skillId, state.actionId)
+  if (!found) {
+    user.wizard = undefined
+    await saveUser(user)
+    return { kind: 'error', text: 'Wizard state invalid. Cleared.' }
+  }
+  const { skill, action } = found
+
+  if (state.argIdx >= action.args.length) return null
+  const currentArg = action.args[state.argIdx]
+  if (currentArg.type !== 'image' && currentArg.input !== 'attachment') return null
+
+  // Cap at MAX_WIZARD_PHOTOS (preserves user selection order)
+  const capped = images.slice(0, MAX_WIZARD_PHOTOS)
+  const refs = capped.map(img => saveTempBlob(img.data, img.mime))
+  // Merge with any already-pending singles (edge case: user pre-sent 1 photo before the album)
+  const existing = state.pending_images ?? []
+  const merged = [...existing, ...refs].slice(0, MAX_WIZARD_PHOTOS)
+
+  state.collected[currentArg.name] = merged.join(',')
+  if (!state.collected_labels) state.collected_labels = {}
+  state.collected_labels[currentArg.name] = `📸 ${merged.length} 張`
+  state.pending_images = undefined
   state.argIdx += 1
   user.wizard = state
   await saveUser(user)

@@ -454,7 +454,7 @@ test('qa ask: out-of-kb question returns honest no-data reply without LLM', asyn
   try {
     const result = await ask({ question: '今天天氣如何' }, dir)
     assert.equal(result.ok, true)
-    assert.ok(result.rendered?.includes('沒資料'), `expected "沒資料" in: ${result.rendered}`)
+    assert.ok(result.rendered?.includes('手頭沒'), `expected no-data phrase in: ${result.rendered}`)
     assert.ok(result.followUps?.some(f => f.url?.includes('ultralab.tw')), 'must include ultralab.tw link')
   } finally {
     rmSync(dir, { recursive: true, force: true })
@@ -888,4 +888,162 @@ test('admin gate: probeAdminAccess returns false on network failure (fail-safe n
       delete process.env.UDH_BASE_URL
     }
   }
+})
+
+// ── Photo album (多圖萃取) ──────────────────────────────────────────────────────
+// Test fixture: 2-arg skill (image arg first, text arg second).
+// Image commit advances to the text-arg step (no API call) so we can inspect state.
+async function withImgFixture(fn) {
+  const { mkdirSync, writeFileSync, rmSync } = await import('node:fs')
+  const { bootRegistry } = await import('../dist/platform/registry.js')
+  const dir = 'zz-img-fixture'
+  mkdirSync(`skills/${dir}`, { recursive: true })
+  try {
+    writeFileSync(
+      `skills/${dir}/SKILL.md`,
+      [
+        '---',
+        'name: zz-img-fixture',
+        'description: Test fixture for multi-image wizard.',
+        'metadata:',
+        '  pin:',
+        '    version: "1.0"',
+        '    icon: 🧪',
+        '    primary_color: "#000000"',
+        '    actions:',
+        '      - id: upload',
+        '        label: 上傳照片',
+        '        args:',
+        '          - name: photos',
+        '            label: 照片',
+        '            type: image',
+        '            input: attachment',
+        '          - name: caption',
+        '            label: 說明',
+        '            input: text',
+        '        api:',
+        '          method: POST',
+        '          url: "http://127.0.0.1:1/never-reached"',
+        '          body:',
+        '            images: "{photos}"',
+        '---',
+        'Fixture.',
+      ].join('\n'),
+      'utf-8',
+    )
+    bootRegistry()  // re-scan to pick up the fixture
+    await fn()
+  } finally {
+    rmSync(`skills/${dir}`, { recursive: true, force: true })
+    bootRegistry()  // restore
+  }
+}
+
+const fakeImg = (n) => ({ data: Buffer.from(`fake-jpeg-${n}`), mime: 'image/jpeg' })
+
+test('photo album ①: processWizardImages commits all N images at once (TG album path)', async () => {
+  await withImgFixture(async () => {
+    const { processWizardImages } = await import('../dist/platform/wizard.js')
+    const { ensureUser, loadUser } = await import('../dist/storage/jsonStore.js')
+    const { startWizard } = await import('../dist/platform/wizard.js')
+
+    const userKey = 'tg:IMG_BATCH_' + Date.now()
+    const user = await ensureUser(userKey, 'test')
+    await startWizard(user, 'zz-img-fixture', 'upload')
+
+    const freshUser = await loadUser(userKey)
+    assert.ok(freshUser?.wizard, 'wizard should be active')
+    assert.equal(freshUser.wizard.argIdx, 0, 'should be at image arg')
+
+    // Simulate TG album: 3 images delivered at once
+    const result = await processWizardImages(freshUser, [fakeImg(1), fakeImg(2), fakeImg(3)])
+    assert.ok(result, 'should return an outcome')
+    assert.notEqual(result.kind, 'error', `unexpected error: ${result?.text}`)
+
+    const after = await loadUser(userKey)
+    assert.equal(after?.wizard?.argIdx, 1, 'argIdx must advance to 1 after batch commit')
+    const refs = (after?.wizard?.collected?.photos ?? '').split(',').filter(Boolean)
+    assert.equal(refs.length, 3, 'should store 3 comma-separated tmp: refs')
+    assert.ok(refs.every(r => r.startsWith('tmp:')), 'each ref must start with tmp:')
+  })
+})
+
+test('photo album ②: single image still works (accumulate → commit)', async () => {
+  await withImgFixture(async () => {
+    const { processWizardImage } = await import('../dist/platform/wizard.js')
+    const { processWizardCallback } = await import('../dist/platform/wizard.js')
+    const { ensureUser, loadUser } = await import('../dist/storage/jsonStore.js')
+    const { startWizard } = await import('../dist/platform/wizard.js')
+
+    const userKey = 'line:IMG_SINGLE_' + Date.now()
+    const user = await ensureUser(userKey, 'test')
+    await startWizard(user, 'zz-img-fixture', 'upload')
+
+    const u0 = await loadUser(userKey)
+    assert.equal(u0?.wizard?.argIdx, 0)
+
+    // Send one image → should accumulate, NOT advance argIdx
+    await processWizardImage(u0, fakeImg(1))
+    const u1 = await loadUser(userKey)
+    assert.equal(u1?.wizard?.argIdx, 0, 'argIdx must NOT advance after single image (accumulate mode)')
+    assert.equal(u1?.wizard?.pending_images?.length, 1, 'pending_images should have 1 entry')
+
+    // Commit → should advance argIdx
+    await processWizardCallback(u1, 'wz:img:commit')
+    const u2 = await loadUser(userKey)
+    assert.equal(u2?.wizard?.argIdx, 1, 'argIdx must advance after wz:img:commit')
+    const refs = (u2?.wizard?.collected?.photos ?? '').split(',').filter(Boolean)
+    assert.equal(refs.length, 1, 'collected should have 1 tmp: ref')
+    assert.ok(refs[0].startsWith('tmp:'), 'ref must start with tmp:')
+  })
+})
+
+test('photo album ③: >MAX_PHOTOS → first MAX stored, rest discarded', async () => {
+  await withImgFixture(async () => {
+    const { processWizardImages } = await import('../dist/platform/wizard.js')
+    const { ensureUser, loadUser } = await import('../dist/storage/jsonStore.js')
+    const { startWizard } = await import('../dist/platform/wizard.js')
+
+    const userKey = 'tg:IMG_CAP_' + Date.now()
+    const user = await ensureUser(userKey, 'test')
+    await startWizard(user, 'zz-img-fixture', 'upload')
+
+    const freshUser = await loadUser(userKey)
+    // Send 11 images (> MAX_PHOTOS=8)
+    const imgs = Array.from({ length: 11 }, (_, i) => fakeImg(i + 1))
+    await processWizardImages(freshUser, imgs)
+
+    const after = await loadUser(userKey)
+    const refs = (after?.wizard?.collected?.photos ?? '').split(',').filter(Boolean)
+    assert.ok(refs.length <= 8, `must cap at MAX_PHOTOS=8, got ${refs.length}`)
+    assert.ok(refs.length > 0, 'must store at least 1 image')
+  })
+})
+
+test('photo album ④: debounce invariant — argIdx stays 0 during accumulation; advances once on commit', async () => {
+  await withImgFixture(async () => {
+    const { processWizardImage, processWizardCallback } = await import('../dist/platform/wizard.js')
+    const { ensureUser, loadUser } = await import('../dist/storage/jsonStore.js')
+    const { startWizard } = await import('../dist/platform/wizard.js')
+
+    const userKey = 'tg:IMG_DEBOUNCE_' + Date.now()
+    const user = await ensureUser(userKey, 'test')
+    await startWizard(user, 'zz-img-fixture', 'upload')
+
+    let u = await loadUser(userKey)
+    for (let i = 1; i <= 3; i++) {
+      // Each individual image must NOT trigger extraction (argIdx stays 0)
+      await processWizardImage(u, fakeImg(i))
+      u = await loadUser(userKey)
+      assert.equal(u?.wizard?.argIdx, 0, `after image ${i}: argIdx must stay 0 (no premature extraction)`)
+      assert.equal(u?.wizard?.pending_images?.length, i, `pending_images must grow to ${i}`)
+    }
+
+    // Only wz:img:commit triggers extraction (argIdx advances exactly once)
+    await processWizardCallback(u, 'wz:img:commit')
+    const final = await loadUser(userKey)
+    assert.equal(final?.wizard?.argIdx, 1, 'argIdx must advance to 1 exactly once after commit')
+    const refs = (final?.wizard?.collected?.photos ?? '').split(',').filter(Boolean)
+    assert.equal(refs.length, 3, 'all 3 accumulated images committed together')
+  })
 })

@@ -31,6 +31,8 @@ export interface WizardState {
   collected_labels?: Record<string, string>
   /** Generated preview content (when waiting for confirm) */
   preview?: { content: any; rawText?: string }
+  /** tmp: refs accumulated for multi-photo arg (LINE/WA path); committed on wz:img:commit. */
+  pending_images?: string[]
   startedAt: string
 }
 

@@ -5,7 +5,7 @@ import { findAction, findSkill, allSkills } from '../platform/registry.js'
 import { rootMenu, skillMenu, parseCallback } from '../platform/menuRenderer.js'
 import { probeAdminAccess } from '../products/udhouse.js'
 import { executeAction } from '../platform/actionExecutor.js'
-import { startWizard, processWizardCallback, processWizardText, processWizardImage, type WizardOutcome } from '../platform/wizard.js'
+import { startWizard, processWizardCallback, processWizardText, processWizardImage, processWizardImages, type WizardOutcome } from '../platform/wizard.js'
 import { createBindingToken } from '../platform/binding.js'
 import { buildAgentCardData, renderAgentCardText } from '../platform/agentCard.js'
 import { incrementStat, incrementAgentStat } from '../runtime/stats.js'
@@ -169,7 +169,13 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       const outcome = await processWizardCallback(user, msg.callback)
       if (outcome) return wizardOutcomeToReply(outcome, skill)
     }
-    if (msg.image) {
+    if (msg.images && msg.images.length > 0) {
+      // TG album: multiple images delivered at once → commit immediately
+      user = (await loadUser(userKey)) ?? user
+      const outcome = await processWizardImages(user, msg.images)
+      if (outcome) return wizardOutcomeToReply(outcome, skill)
+    } else if (msg.image) {
+      // Single image (LINE, WA, TG single) → accumulate, show "done" button
       user = (await loadUser(userKey)) ?? user
       const outcome = await processWizardImage(user, msg.image)
       if (outcome) return wizardOutcomeToReply(outcome, skill)
