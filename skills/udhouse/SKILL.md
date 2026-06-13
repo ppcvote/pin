@@ -75,6 +75,7 @@ metadata:
           template: |
             ✨ AI 從照片產出的物件草稿:
 
+            📝 標題: {{response.suggested.suggested_title}}
             🏠 類型: {{response.suggested.estimated_type}}
             📍 區域: {{response.suggested.estimated_district}}
             🛏 {{response.suggested.estimated_bedrooms}} 房 {{response.suggested.estimated_bathrooms}} 衛
