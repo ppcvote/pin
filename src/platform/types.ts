@@ -135,6 +135,8 @@ export interface PinExtension {
   webhooks?: WebhookSpec[]
   /** Per PIN_ONBOARDING §C — link to product's connect page for the 探索 section. */
   connect_url?: string
+  /** When true, skill is only visible to users confirmed as admin via the identity probe. */
+  requires_admin?: boolean
 }
 
 export interface Skill {

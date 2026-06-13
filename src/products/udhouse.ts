@@ -55,3 +55,24 @@ export async function listLeads(): Promise<UDHLead[]> {
   const r = await call<any>('/api/v1/leads')
   return r.data ?? r.leads ?? r
 }
+
+/**
+ * Probe whether the currently configured UDH_API_KEY has admin access.
+ * Reads env vars at call-time (not module-load) so tests can override UDH_BASE_URL.
+ * Returns true on HTTP 200, false on 403 or any error (fail-safe non-admin).
+ */
+export async function probeAdminAccess(): Promise<boolean> {
+  const base = process.env.UDH_BASE_URL ?? 'https://social.8338.hk'
+  const key = process.env.UDH_API_KEY
+  try {
+    await httpRequest<any>(`${base}/api/v1/admin/stats`, {
+      headers: {
+        Authorization: `Bearer ${key ?? ''}`,
+        'Content-Type': 'application/json',
+      },
+    })
+    return true
+  } catch {
+    return false
+  }
+}

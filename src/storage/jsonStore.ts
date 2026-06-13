@@ -59,6 +59,8 @@ export interface UserRecord {
   bind_attempts?: { hourBucket: string; count: number }
   /** ISO timestamp of the last inbound WhatsApp message from this user. Drives the 24-hour window check. */
   wa_last_inbound?: string
+  /** Cached result of admin identity probes, keyed by skill ID. Once set, skips re-probe. */
+  admin_probe_cache?: Record<string, { isAdmin: boolean; checkedAt: string }>
   /**
    * Pending agent-triggered mutation awaiting confirmation. PIN_AGENT_MODE §4.2:
    * POST/PUT/DELETE actions chosen by the LLM go through a forced preview

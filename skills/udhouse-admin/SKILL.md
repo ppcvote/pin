@@ -11,6 +11,7 @@ metadata:
     version: "1.0"
     icon: 🛠
     primary_color: "#7C3AED"
+    requires_admin: true
     secrets:
       - UDH_API_KEY
       - UDH_BASE_URL
