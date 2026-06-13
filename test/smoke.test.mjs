@@ -460,3 +460,161 @@ test('qa ask: out-of-kb question returns honest no-data reply without LLM', asyn
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+// ── WhatsApp adapter Phase 1 (工單8) ─────────────────────────────────────────
+
+test('whatsapp: toWaText maps bold and italic to WA native syntax', async () => {
+  const { toWaText } = await import('../dist/channels/whatsapp.js')
+  assert.equal(toWaText('**hello**'), '*hello*', '**bold** → *bold*')
+  assert.equal(toWaText('__world__'), '_world_', '__italic__ → _italic_')
+  assert.equal(toWaText('**bold** and __italic__'), '*bold* and _italic_')
+  assert.equal(toWaText('plain text'), 'plain text', 'plain text untouched')
+})
+
+test('whatsapp button downgrade: ≤3 callback → reply buttons (type=button)', async () => {
+  const { buildPayload } = await import('../dist/channels/whatsapp.js')
+  const buttons = [[
+    { text: '選項A', callback_data: 'cb:a' },
+    { text: '選項B', callback_data: 'cb:b' },
+    { text: '選項C', callback_data: 'cb:c' },
+  ]]
+  const p = buildPayload('85201234567', '請選擇', buttons)
+  assert.equal(p.type, 'interactive')
+  const ia = p.interactive
+  assert.equal(ia.type, 'button', 'should use reply buttons for ≤3')
+  assert.equal(ia.action.buttons.length, 3)
+  assert.equal(ia.action.buttons[0].reply.id, 'cb:a')
+  assert.equal(ia.action.buttons[1].reply.id, 'cb:b')
+})
+
+test('whatsapp button downgrade: 4–10 callback → list message (type=list)', async () => {
+  const { buildPayload } = await import('../dist/channels/whatsapp.js')
+  const rows = Array.from({ length: 7 }, (_, i) => ({
+    text: `項目 ${i + 1}`,
+    callback_data: `cb:item${i}`,
+  }))
+  const p = buildPayload('85201234567', '選單', [rows])
+  assert.equal(p.type, 'interactive')
+  const ia = p.interactive
+  assert.equal(ia.type, 'list', 'should use list message for 4-10')
+  assert.equal(ia.action.sections[0].rows.length, 7)
+  assert.equal(ia.action.sections[0].rows[0].id, 'cb:item0')
+})
+
+test('whatsapp button downgrade: >10 callback → 9 items + 更多 ▸ sentinel', async () => {
+  const { buildPayload } = await import('../dist/channels/whatsapp.js')
+  const rows = Array.from({ length: 12 }, (_, i) => ({
+    text: `項目 ${i + 1}`,
+    callback_data: `cb:item${i}`,
+  }))
+  const p = buildPayload('85201234567', '選單', [rows])
+  assert.equal(p.type, 'interactive')
+  const ia = p.interactive
+  assert.equal(ia.type, 'list', 'paginated should still be list type')
+  const resultRows = ia.action.sections[0].rows
+  assert.equal(resultRows.length, 10, 'should have 9 items + 更多 sentinel')
+  assert.equal(resultRows[9].id, '__more__', 'last row must be the pagination sentinel')
+  assert.equal(resultRows[9].title, '更多 ▸')
+  assert.equal(resultRows[0].id, 'cb:item0', 'first 9 items are unchanged')
+})
+
+test('whatsapp button downgrade: url buttons become text links, not interactive', async () => {
+  const { buildPayload } = await import('../dist/channels/whatsapp.js')
+  const buttons = [[
+    { text: '查看網站', url: 'https://ultralab.tw' },
+  ]]
+  const p = buildPayload('85201234567', '歡迎', buttons)
+  assert.equal(p.type, 'text', 'url-only buttons should yield plain text message')
+  assert.ok(p.text.body.includes('https://ultralab.tw'), 'URL must appear in body text')
+  assert.ok(p.text.body.includes('查看網站'), 'link label must appear in body text')
+})
+
+test('whatsapp inbound: parse plain text message', async () => {
+  const { WhatsAppChannel } = await import('../dist/channels/whatsapp.js')
+  const received = []
+  const ch = new WhatsAppChannel('phoneId', 'token-test')
+  await ch.start(async (msg) => { received.push(msg); return null })
+
+  await ch.handleWebhook({
+    entry: [{
+      changes: [{
+        value: {
+          messages: [{
+            from: '85299887766',
+            id: 'wamid.001',
+            type: 'text',
+            text: { body: '你好' },
+          }],
+          contacts: [{ wa_id: '85299887766', profile: { name: '陳大文' } }],
+        },
+      }],
+    }],
+  })
+
+  assert.equal(received.length, 1)
+  const msg = received[0]
+  assert.equal(msg.channelId, 'whatsapp')
+  assert.equal(msg.userId, '85299887766')
+  assert.equal(msg.userDisplayName, '陳大文')
+  assert.equal(msg.text, '你好')
+  assert.equal(msg.callback, undefined)
+})
+
+test('whatsapp inbound: parse interactive button_reply → callback', async () => {
+  const { WhatsAppChannel } = await import('../dist/channels/whatsapp.js')
+  const received = []
+  const ch = new WhatsAppChannel('phoneId', 'token-test')
+  await ch.start(async (msg) => { received.push(msg); return null })
+
+  await ch.handleWebhook({
+    entry: [{
+      changes: [{
+        value: {
+          messages: [{
+            from: '85299887766',
+            id: 'wamid.002',
+            type: 'interactive',
+            interactive: {
+              type: 'button_reply',
+              button_reply: { id: 's:mindthread', title: '查數據' },
+            },
+          }],
+          contacts: [{ wa_id: '85299887766', profile: { name: 'Bob' } }],
+        },
+      }],
+    }],
+  })
+
+  assert.equal(received.length, 1)
+  assert.equal(received[0].callback, 's:mindthread')
+  assert.equal(received[0].text, undefined)
+})
+
+test('whatsapp inbound: parse interactive list_reply → callback', async () => {
+  const { WhatsAppChannel } = await import('../dist/channels/whatsapp.js')
+  const received = []
+  const ch = new WhatsAppChannel('phoneId', 'token-test')
+  await ch.start(async (msg) => { received.push(msg); return null })
+
+  await ch.handleWebhook({
+    entry: [{
+      changes: [{
+        value: {
+          messages: [{
+            from: '85299887766',
+            id: 'wamid.003',
+            type: 'interactive',
+            interactive: {
+              type: 'list_reply',
+              list_reply: { id: 'a:udhouse:list_listings', title: '睇盤' },
+            },
+          }],
+          contacts: [{ wa_id: '85299887766', profile: { name: 'Carol' } }],
+        },
+      }],
+    }],
+  })
+
+  assert.equal(received.length, 1)
+  assert.equal(received[0].callback, 'a:udhouse:list_listings')
+})
