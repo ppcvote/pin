@@ -359,3 +359,28 @@ test('bind error path 1: expired token → generic failure + recovery instructio
   assert.ok(r.text.includes('回到產品頁面'), 'must include recovery path (how to get a new link)')
   assert.ok(!r.text.includes('tenant-expire-test'), 'failure must not disclose internal details')
 })
+
+test('bind error path 2: duplicate bind (already bound, fresh token, same tenant) → friendly ack + no dup state', async () => {
+  const { handlePinMessage } = await import('../dist/core/handle.js')
+  const { loadUser } = await import('../dist/storage/jsonStore.js')
+
+  const uid = 'TEST_DUP_BIND_' + Date.now()
+  const msg = (text) => ({ channelId: 'line', userId: uid, userDisplayName: 't', text })
+
+  // First bind
+  const t1 = await createBindToken('udhouse', 'tenant-dup-test')
+  const r1 = await handlePinMessage(msg(`bind ${t1.token}`))
+  assert.ok(r1.text.includes('已連接'), 'first bind must succeed')
+
+  // Same user, same skill+tenant, fresh token (user re-clicked the product button)
+  const t2 = await createBindToken('udhouse', 'tenant-dup-test')
+  const r2 = await handlePinMessage(msg(`bind ${t2.token}`))
+  assert.ok(!r2.text.includes('失效') && !r2.text.includes('錯誤'), 'duplicate bind must not show any error')
+  assert.ok(r2.text.includes('已連接') || r2.text.includes('已重新連接'), 'must confirm connection, not error')
+  assert.ok(r2.text.includes('原本的設定'), 'friendly message should reassure existing settings are kept')
+
+  // State must not be duplicated — exactly one binding entry
+  const user = await loadUser('line:' + uid)
+  assert.equal(Object.keys(user?.bindings ?? {}).length, 1, 'must have exactly one binding, not accumulated')
+  assert.equal(user?.bindings?.udhouse?.tenantKey, 'tenant-dup-test', 'correct tenantKey stored')
+})
