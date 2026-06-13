@@ -73,6 +73,7 @@ export function loadSkill(skillDir: string): Skill {
     ? {
         version: String(fm.metadata.pin.version ?? '1.0'),
         icon: fm.metadata.pin.icon,
+        display_name: fm.metadata.pin.display_name,
         primary_color: fm.metadata.pin.primary_color,
         secrets: fm.metadata.pin.secrets ?? [],
         connect_url: fm.metadata.pin.connect_url,
