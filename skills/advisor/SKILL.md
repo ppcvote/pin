@@ -68,6 +68,23 @@ metadata:
       #   - 每日金句「自動推播」（不是按鈕, 是排程）: 等 Pin runtime 排程器,
       #     端點已就緒（/api/daily-quote?date= 可預取）, 工單見 INBOX
       #   - 其他工具（退休規劃 / 房貸試算…）視會員需求逐顆加
+    # —— 會員通知綁定（PPC 2026-06-13「12都上」）——
+    # 宣告 webhooks → Pin 自動在本 skill 選單顯示「🔔 綁定通知」鈕，
+    # 會員拿 token 到 ultra-advisor.tw 後台貼上完成綁定（流程見 binding.ts）。
+    # secret = Pin .env 的 ADVISOR_PIN_WEBHOOK_SECRET，須與 Advisor 後端共用值。
+    webhooks:
+      - event: daily_quote.scheduled
+        secret: ADVISOR_PIN_WEBHOOK_SECRET
+        notify:
+          template: |
+            ✨ 每日金句 · {{data.date}}
+
+            「{{data.text}}」
+
+            — Ultra Advisor
+          buttons:
+            - label: 🌐 開啟 Ultra Advisor
+              url: "https://ultra-advisor.tw/"
 ---
 
 # Advisor skill
