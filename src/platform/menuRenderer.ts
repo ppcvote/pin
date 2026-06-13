@@ -6,24 +6,33 @@ export interface InlineButton {
   callback_data: string
 }
 
-/** Top-level menu — agent card up top + bound skills + 🧭 探索 (un-bound). */
-export function rootMenu(boundSkillIds: string[] = []): { title: string; buttons: InlineButton[][] } {
+/** Top-level menu — agent card up top + bound skills + 🧭 探索 (un-bound).
+ *  adminGrantedSkillIds: skill IDs confirmed admin by the identity probe.
+ *  Skills with requires_admin: true are invisible unless the skill ID is in this set. */
+export function rootMenu(
+  boundSkillIds: string[] = [],
+  adminGrantedSkillIds: string[] = [],
+): { title: string; buttons: InlineButton[][] } {
   const skills = allSkills()
   const bound = new Set(boundSkillIds)
+  const adminGranted = new Set(adminGrantedSkillIds)
+  // Admin-gated skills are always filtered, regardless of binding state
+  const visibleSkills = skills.filter(s => !s.pin?.requires_admin || adminGranted.has(s.id))
+
   const buttons: InlineButton[][] = []
   buttons.push([{ text: '🃏 看我的 Agent', callback_data: 'card' }])
 
   // Bound (or, if nothing is bound yet, show all so dogfood users aren't stranded)
   const showAll = bound.size === 0
-  const myskills = showAll ? skills : skills.filter(s => bound.has(s.id))
+  const myskills = showAll ? visibleSkills : visibleSkills.filter(s => bound.has(s.id))
   for (const s of myskills) {
     const icon = s.pin?.icon ?? '•'
     buttons.push([{ text: `${icon} ${s.name}`, callback_data: `s:${s.id}` }])
   }
 
-  // 🧭 探索 — show only when there are un-bound skills to surface
+  // 🧭 探索 — show only when there are un-bound visible skills to surface
   if (!showAll) {
-    const explore = skills.filter(s => !bound.has(s.id))
+    const explore = visibleSkills.filter(s => !bound.has(s.id))
     if (explore.length > 0) {
       buttons.push([{ text: '🧭 探索 (還沒連接)', callback_data: 'explore' }])
     }

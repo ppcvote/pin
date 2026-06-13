@@ -93,6 +93,8 @@ export function compileToolsForUser(user: UserRecord): CompiledTool[] {
     // If the user has any bindings at all, filter to those skills only.
     // Otherwise (dogfood / pre-Phase-A users) expose all skills.
     if (hasAnyBinding && !(skill.id in bindings)) continue
+    // Admin gate: requires_admin skills only for confirmed admins (probe cache must say isAdmin=true)
+    if (skill.pin?.requires_admin && !user.admin_probe_cache?.[skill.id]?.isAdmin) continue
     for (const action of skill.pin?.actions ?? []) {
       if (action.visibility === 'hidden') continue
       if (action.visibility === 'callback_only') continue
