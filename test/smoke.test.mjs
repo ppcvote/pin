@@ -21,10 +21,10 @@ import { createBindToken, redeemBindToken, peekBindToken } from '../dist/storage
 bootRegistry()
 const skills = allSkills()
 
-test('five live skills are registered', () => {
-  assert.equal(skills.length, 5)
+test('six live skills are registered', () => {
+  assert.equal(skills.length, 6)
   const ids = skills.map(s => s.id).sort()
-  assert.deepEqual(ids, ['advisor', 'mindthread', 'slides', 'udhouse', 'ultragrowth'])
+  assert.deepEqual(ids, ['advisor', 'domain', 'mindthread', 'slides', 'udhouse', 'ultragrowth'])
 })
 
 test('slides skill: make_deck wizard args + generous timeout', () => {
@@ -335,4 +335,27 @@ test('atr: malicious SKILL.md is refused at load; benign one still loads', async
   } finally {
     rmSync(`skills/${ok}`, { recursive: true, force: true })
   }
+})
+
+// ── Bind error paths (ONBOARDING 工單 1: §A error paths) ─────────────────────
+
+test('bind error path 1: expired token → generic failure + recovery instructions', async () => {
+  const { handlePinMessage } = await import('../dist/core/handle.js')
+  const { readFile, writeFile } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+
+  const uid = 'TEST_EXPIRED_' + Date.now()
+  const entry = await createBindToken('udhouse', 'tenant-expire-test')
+
+  // Backdate the token's expiry so redeemBindToken treats it as expired
+  const filePath = join(process.cwd(), 'data', 'bind_tokens.json')
+  const raw = JSON.parse(await readFile(filePath, 'utf-8'))
+  raw[entry.token].expiresAt = new Date(Date.now() - 60_000).toISOString()
+  await writeFile(filePath, JSON.stringify(raw, null, 2), 'utf-8')
+
+  const r = await handlePinMessage({ channelId: 'line', userId: uid, userDisplayName: 't', text: `bind ${entry.token}` })
+  // Spec §A: all failures return the same message (no reason disclosure)
+  assert.ok(r.text.includes('已失效'), 'expired token → generic failure message')
+  assert.ok(r.text.includes('回到產品頁面'), 'must include recovery path (how to get a new link)')
+  assert.ok(!r.text.includes('tenant-expire-test'), 'failure must not disclose internal details')
 })
