@@ -10,6 +10,7 @@ import { initSkillThreatScan } from './platform/skillThreatScan.js'
 import { findDueReminders, markReminderFired } from './skills/reminders.js'
 import { TelegramChannel } from './channels/telegram.js'
 import { LineChannel } from './channels/line.js'
+import { WhatsAppChannel } from './channels/whatsapp.js'
 import { handlePinMessage } from './core/handle.js'
 import { brainName } from './brain/index.js'
 import { startWebhookServer } from './server/webhooks.js'
@@ -34,6 +35,12 @@ if (process.env.LINE_CHANNEL_ACCESS_TOKEN && process.env.LINE_CHANNEL_SECRET) {
   channels.push(new LineChannel(
     process.env.LINE_CHANNEL_ACCESS_TOKEN,
     process.env.LINE_CHANNEL_SECRET,
+  ))
+}
+if (process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN) {
+  channels.push(new WhatsAppChannel(
+    process.env.WHATSAPP_PHONE_NUMBER_ID,
+    process.env.WHATSAPP_ACCESS_TOKEN,
   ))
 }
 
