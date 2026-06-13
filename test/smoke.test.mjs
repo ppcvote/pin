@@ -21,10 +21,10 @@ import { createBindToken, redeemBindToken, peekBindToken } from '../dist/storage
 bootRegistry()
 const skills = allSkills()
 
-test('six live skills are registered', () => {
-  assert.equal(skills.length, 6)
+test('seven live skills are registered', () => {
+  assert.equal(skills.length, 7)
   const ids = skills.map(s => s.id).sort()
-  assert.deepEqual(ids, ['advisor', 'domain', 'mindthread', 'slides', 'udhouse', 'ultragrowth'])
+  assert.deepEqual(ids, ['advisor', 'domain', 'mindthread', 'qa', 'slides', 'udhouse', 'ultragrowth'])
 })
 
 test('slides skill: make_deck wizard args + generous timeout', () => {
@@ -409,4 +409,54 @@ test('bind error path 3: device rebind (new token, different tenantKey) → old 
   const userAfterRebind = await loadUser('line:' + uid)
   assert.equal(userAfterRebind?.bindings?.udhouse?.tenantKey, 'tenant-device-b', 'new tenantKey must be active')
   assert.equal(Object.keys(userAfterRebind?.bindings ?? {}).length, 1, 'old binding replaced, not accumulated')
+})
+
+// ── QA skill (工單 10 Phase 1) ─────────────────────────────────────────────────
+
+test('qa skill: registered with ask action', () => {
+  const f = findAction('qa', 'ask')
+  assert.ok(f, 'qa skill must be registered with an ask action')
+  assert.equal(f.action.handler, 'ask', 'ask action must declare handler: ask')
+  assert.equal(f.action.args.length, 1)
+  assert.equal(f.action.args[0].name, 'question')
+  assert.equal(f.action.args[0].input, 'text')
+  assert.equal(f.action.visibility, 'primary', 'ask has a text-input arg → primary visibility')
+})
+
+test('qa search: in-kb questions hit relevant entries with source URLs', async () => {
+  const { loadKnowledge, search } = await import('../dist/skills/qa.js')
+  const dir = 'skills/qa/knowledge'
+  const entries = loadKnowledge(dir)
+  assert.ok(entries.length >= 8, `expected ≥8 KB entries, got ${entries.length}`)
+
+  const questions = ['UltraProbe 是什麼', 'Pin 怎麼綁定', 'AVS 是什麼']
+  for (const q of questions) {
+    const hits = search(q, entries)
+    assert.ok(hits.length > 0, `"${q}" must hit at least one KB entry`)
+    const topHit = hits[0]
+    assert.ok(topHit.source, `top hit for "${q}" must have a source URL (got: ${JSON.stringify(topHit)})`)
+  }
+})
+
+test('qa search: out-of-kb question returns empty (no hallucination)', async () => {
+  const { loadKnowledge, search } = await import('../dist/skills/qa.js')
+  const entries = loadKnowledge('skills/qa/knowledge')
+  const hits = search('今天天氣如何', entries)
+  assert.equal(hits.length, 0, 'out-of-kb query must return zero hits')
+})
+
+test('qa ask: out-of-kb question returns honest no-data reply without LLM', async () => {
+  const { ask } = await import('../dist/skills/qa.js')
+  // Use a temp dir with no files so no KB entries exist
+  const { mkdtempSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const dir = mkdtempSync(tmpdir() + '/qa-test-')
+  try {
+    const result = await ask({ question: '今天天氣如何' }, dir)
+    assert.equal(result.ok, true)
+    assert.ok(result.rendered?.includes('沒資料'), `expected "沒資料" in: ${result.rendered}`)
+    assert.ok(result.followUps?.some(f => f.url?.includes('ultralab.tw')), 'must include ultralab.tw link')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
