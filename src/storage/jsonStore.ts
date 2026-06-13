@@ -57,6 +57,8 @@ export interface UserRecord {
   bindings?: Record<string, { tenantKey: string; boundAt: string }>
   /** Bind redemption rate limit — counter resets each hour bucket. */
   bind_attempts?: { hourBucket: string; count: number }
+  /** ISO timestamp of the last inbound WhatsApp message from this user. Drives the 24-hour window check. */
+  wa_last_inbound?: string
   /**
    * Pending agent-triggered mutation awaiting confirmation. PIN_AGENT_MODE §4.2:
    * POST/PUT/DELETE actions chosen by the LLM go through a forced preview

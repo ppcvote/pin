@@ -1,4 +1,5 @@
 import type { Button, Channel, MessageHandler, InboundMessage } from './types.js'
+import { loadUser, saveUser, ensureUser } from '../storage/jsonStore.js'
 
 const GRAPH_API_VERSION = 'v19.0'
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`
@@ -111,6 +112,71 @@ export function buildPayload(
   }
 }
 
+// ── 24-hour window state machine (Phase 2) ───────────────────────────────────
+
+export interface WaTemplate {
+  name: string
+  language: string
+  /** 'approved' = Meta accepted; 'pending' = under review; 'rejected' = refused */
+  status: 'approved' | 'pending' | 'rejected'
+  /** Number of {{N}} body variable placeholders in the Meta template */
+  bodyParamCount: number
+}
+
+/**
+ * Template catalog — flip status to 'approved' once Meta reviews each entry.
+ * Exported so tests can temporarily patch the status field.
+ */
+export const TEMPLATE_CATALOG: WaTemplate[] = [
+  {
+    name: 'pin_push_notification',
+    language: 'zh_TW',
+    status: 'pending',  // update to 'approved' after Meta review
+    bodyParamCount: 1,  // {{1}} = notification body text
+  },
+]
+
+export function findApprovedTemplate(): WaTemplate | undefined {
+  return TEMPLATE_CATALOG.find(t => t.status === 'approved')
+}
+
+export function buildTemplatePayload(
+  to: string,
+  template: WaTemplate,
+  text: string,
+): Record<string, unknown> {
+  const components: unknown[] = template.bodyParamCount > 0
+    ? [{ type: 'body', parameters: [{ type: 'text', text: text.slice(0, 1024) }] }]
+    : []
+  return {
+    messaging_product: 'whatsapp',
+    to,
+    type: 'template',
+    template: {
+      name: template.name,
+      language: { code: template.language },
+      components,
+    },
+  }
+}
+
+const WINDOW_MS = 24 * 60 * 60 * 1000
+
+/** Store the timestamp of a user's inbound message, opening/refreshing the 24-hour window. */
+export async function recordInbound(waUserId: string, displayName: string): Promise<void> {
+  const userKey = `wa:${waUserId}`
+  const user = await ensureUser(userKey, displayName)
+  user.wa_last_inbound = new Date().toISOString()
+  await saveUser(user)
+}
+
+/** True when the user has sent an inbound message within the past 24 hours. */
+export async function isWindowOpen(waUserId: string): Promise<boolean> {
+  const user = await loadUser(`wa:${waUserId}`)
+  if (!user?.wa_last_inbound) return false
+  return Date.now() - new Date(user.wa_last_inbound).getTime() < WINDOW_MS
+}
+
 // ── Channel ───────────────────────────────────────────────────────────────────
 
 export class WhatsAppChannel implements Channel {
@@ -125,13 +191,24 @@ export class WhatsAppChannel implements Channel {
 
   async start(handler: MessageHandler): Promise<void> {
     this.handler = handler
-    // Inbound arrives via /whatsapp/webhook — wired in Phase 2.
+    // Inbound arrives via /whatsapp/webhook — wired in Phase 3.
   }
 
   async stop(): Promise<void> {}
 
   async sendDirect(userId: string, text: string, buttons?: Button[][]): Promise<void> {
-    await this.post(buildPayload(userId, text, buttons))
+    if (await isWindowOpen(userId)) {
+      // 24-hour window open: free-form message allowed
+      await this.post(buildPayload(userId, text, buttons))
+      return
+    }
+    // Window closed (≥ 24h since last inbound or never): template required
+    const tpl = findApprovedTemplate()
+    if (!tpl) {
+      await this.deadLetterTemplate(userId, text, 'no approved template available')
+      return
+    }
+    await this.post(buildTemplatePayload(userId, tpl, text))
   }
 
   /** WhatsApp requires an HTTPS image URL (no raw bytes). Caller passes the URL. */
@@ -197,6 +274,11 @@ export class WhatsAppChannel implements Channel {
 
     if (!text && !callback) return
 
+    // Refresh the 24-hour free-form window on every valid inbound
+    await recordInbound(from, displayName).catch(err =>
+      console.error('[wa inbound record]', err)
+    )
+
     const inbound: InboundMessage = {
       channelId: this.id,
       userId: from,
@@ -211,6 +293,29 @@ export class WhatsAppChannel implements Channel {
 
     // WhatsApp has no edit-in-place; edit:true falls back to a new message.
     await this.post(buildPayload(from, reply.text, reply.buttons))
+  }
+
+  private async deadLetterTemplate(userId: string, text: string, reason: string): Promise<void> {
+    const userKey = `wa:${userId}`
+    console.error(`[wa dead-letter] user=${userKey} reason=${reason}`)
+    try {
+      const user = await loadUser(userKey)
+      if (!user) return
+      if (!user.failed_pushes) user.failed_pushes = []
+      user.failed_pushes.push({
+        text: text.slice(0, 500),
+        channelId: 'whatsapp',
+        attempts: 0,
+        lastError: `template_routing: ${reason}`,
+        ts: new Date().toISOString(),
+      })
+      if (user.failed_pushes.length > 100) {
+        user.failed_pushes = user.failed_pushes.slice(-100)
+      }
+      await saveUser(user)
+    } catch (err) {
+      console.error('[wa dead-letter write failed]', err)
+    }
   }
 
   private async post(payload: unknown): Promise<void> {
