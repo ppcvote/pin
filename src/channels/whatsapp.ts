@@ -177,6 +177,18 @@ export async function isWindowOpen(waUserId: string): Promise<boolean> {
   return Date.now() - new Date(user.wa_last_inbound).getTime() < WINDOW_MS
 }
 
+// ── Bind deep link (PIN_WHATSAPP §2) ─────────────────────────────────────────
+
+/**
+ * Build the wa.me pre-fill deep link for channel-initiated binding.
+ * The pre-filled "bind {token}" text is user-initiated, which opens the 24h
+ * free-form window — the entire bind flow requires no template approval.
+ */
+export function buildWaBindLink(phoneNumber: string, token: string): string {
+  const digits = phoneNumber.replace(/\D/g, '')
+  return `https://wa.me/${digits}?text=${encodeURIComponent(`bind ${token}`)}`
+}
+
 // ── Channel ───────────────────────────────────────────────────────────────────
 
 export class WhatsAppChannel implements Channel {
