@@ -12,6 +12,7 @@ import { findSkill } from '../platform/registry.js'
 import { readByName } from '../runtime/tempStore.js'
 import type { Channel, Button } from '../channels/types.js'
 import type { LineChannel } from '../channels/line.js'
+import type { WhatsAppChannel } from '../channels/whatsapp.js'
 
 const PORT = parseInt(process.env.PIN_HTTP_PORT ?? '3000', 10)
 
@@ -70,6 +71,27 @@ function verifySignature(secretEnvName: string | undefined, bodyBuf: Buffer, hea
   return { ok: true }
 }
 
+/**
+ * Verify Meta's X-Hub-Signature-256 header (PIN_WHATSAPP §2).
+ * Must be called with raw body bytes, before any JSON parsing.
+ * Uses timing-safe comparison to resist HMAC oracle attacks.
+ */
+export function verifyWaSignature(
+  appSecret: string,
+  rawBody: Buffer,
+  hubSig: string | undefined,
+): boolean {
+  if (!hubSig) return false
+  const expected = crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex')
+  const provided = hubSig.startsWith('sha256=') ? hubSig.slice(7) : hubSig
+  if (provided.length !== expected.length) return false
+  try {
+    return crypto.timingSafeEqual(Buffer.from(expected, 'utf-8'), Buffer.from(provided, 'utf-8'))
+  } catch {
+    return false
+  }
+}
+
 function renderButtons(buttons: any[] | undefined, skillId: string, scope: any): Button[][] | undefined {
   if (!buttons || buttons.length === 0) return undefined
   const out: Button[][] = []
@@ -94,7 +116,7 @@ function renderButton(b: any, skillId: string, scope: any): Button {
   return { text: render(b.label, scope), callback_data: 'm:root' }
 }
 
-export function startWebhookServer(channels: Channel[]): http.Server {
+export function startWebhookServer(channels: Channel[], port: number = PORT): http.Server {
   const channelById = new Map(channels.map(c => [c.id, c]))
 
   const server = http.createServer(async (req, res) => {
@@ -247,6 +269,76 @@ export function startWebhookServer(channels: Channel[]): http.Server {
       return
     }
 
+    // WhatsApp verify handshake — GET /whatsapp/webhook
+    // Meta pings this endpoint to confirm webhook ownership (hub.challenge round-trip).
+    if (req.method === 'GET' && (req.url ?? '').split('?')[0] === '/whatsapp/webhook') {
+      const qs = new URLSearchParams((req.url ?? '').split('?')[1] ?? '')
+      const mode = qs.get('hub.mode')
+      const token = qs.get('hub.verify_token')
+      const challenge = qs.get('hub.challenge')
+      const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN
+      if (mode === 'subscribe' && verifyToken && token === verifyToken && challenge) {
+        res.writeHead(200, { 'Content-Type': 'text/plain' })
+        res.end(challenge)
+      } else {
+        res.writeHead(403)
+        res.end()
+      }
+      return
+    }
+
+    // WhatsApp inbound — POST /whatsapp/webhook
+    // Sig verification (X-Hub-Signature-256) uses raw body bytes, then dispatches to the adapter.
+    if (req.method === 'POST' && req.url === '/whatsapp/webhook') {
+      const waCh = channelById.get('whatsapp') as WhatsAppChannel | undefined
+      if (!waCh) {
+        res.writeHead(503, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'whatsapp_channel_not_configured' }))
+        return
+      }
+      const chunks: Buffer[] = []
+      let total = 0
+      for await (const chunk of req) {
+        const buf = typeof chunk === 'string' ? Buffer.from(chunk, 'utf-8') : (chunk as Buffer)
+        total += buf.length
+        if (total > 1_000_000) { res.writeHead(413); res.end(); return }
+        chunks.push(buf)
+      }
+      const rawBody = Buffer.concat(chunks)
+      const appSecret = process.env.WHATSAPP_APP_SECRET
+      if (!appSecret) {
+        console.error('[wa webhook] WHATSAPP_APP_SECRET not set — rejecting')
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'configuration_error' }))
+        return
+      }
+      const hubSig = req.headers['x-hub-signature-256'] as string | undefined
+      if (!verifyWaSignature(appSecret, rawBody, hubSig)) {
+        console.warn('[wa webhook] signature rejected')
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'bad_signature' }))
+        return
+      }
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(rawBody.toString('utf-8'))
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'invalid_json' }))
+        return
+      }
+      const result = await waCh.handleWebhook(parsed)
+      if (!result.ok) {
+        console.warn(`[wa webhook] dispatch error: ${result.reason}`)
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: result.reason }))
+        return
+      }
+      res.writeHead(200)
+      res.end('OK')
+      return
+    }
+
     // LINE inbound — POST /line/webhook
     if (req.method === 'POST' && req.url === '/line/webhook') {
       const lineCh = channelById.get('line') as LineChannel | undefined
@@ -372,8 +464,8 @@ export function startWebhookServer(channels: Channel[]): http.Server {
     }
   })
 
-  server.listen(PORT, () => {
-    console.log(`[webhook] HTTP server listening on :${PORT}`)
+  server.listen(port, () => {
+    console.log(`[webhook] HTTP server listening on :${port}`)
     console.log(`[webhook] events:`)
     // We can't import registry here without circular — caller can list separately
   })

@@ -728,3 +728,123 @@ test('whatsapp window: no approved template → push goes to dead-letter, no sil
     TEMPLATE_CATALOG.forEach((t, i) => { t.status = origStatuses[i] })
   }
 })
+
+// ── WhatsApp adapter Phase 3: webhook routing + sig verification + bind link ──
+
+import crypto from 'node:crypto'
+
+test('whatsapp: buildWaBindLink produces correct wa.me deep link', async () => {
+  const { buildWaBindLink } = await import('../dist/channels/whatsapp.js')
+  const token = 'abc123def456ghi789jkl012mno345pq'
+  const link = buildWaBindLink('+852 9988 7766', token)
+  assert.ok(link.startsWith('https://wa.me/85299887766'), 'non-digit chars stripped from phone number')
+  assert.ok(link.includes('text='), 'must include text query param')
+  const decoded = decodeURIComponent(link.split('text=')[1])
+  assert.equal(decoded, `bind ${token}`, 'pre-filled text must be "bind {token}"')
+})
+
+test('whatsapp: verifyWaSignature correct HMAC → true', async () => {
+  const { verifyWaSignature } = await import('../dist/server/webhooks.js')
+  const secret = 'test-app-secret-sig'
+  const body = Buffer.from('{"object":"whatsapp_business_account"}', 'utf-8')
+  const hmac = crypto.createHmac('sha256', secret).update(body).digest('hex')
+  assert.equal(verifyWaSignature(secret, body, `sha256=${hmac}`), true, 'matching HMAC must pass')
+})
+
+test('whatsapp: verifyWaSignature wrong HMAC → false', async () => {
+  const { verifyWaSignature } = await import('../dist/server/webhooks.js')
+  const secret = 'test-app-secret-sig'
+  const body = Buffer.from('{"object":"whatsapp_business_account"}', 'utf-8')
+  assert.equal(verifyWaSignature(secret, body, 'sha256=deadbeefdeadbeef'), false, 'wrong HMAC must fail')
+  assert.equal(verifyWaSignature(secret, body, undefined), false, 'missing header must fail')
+  assert.equal(verifyWaSignature(secret, body, ''), false, 'empty header must fail')
+})
+
+test('whatsapp webhook: GET verify correct token → 200 + challenge', async () => {
+  process.env.WHATSAPP_VERIFY_TOKEN = 'p3-verify-token'
+  process.env.WHATSAPP_APP_SECRET = 'p3-app-secret'
+  const { startWebhookServer } = await import('../dist/server/webhooks.js')
+  const { WhatsAppChannel } = await import('../dist/channels/whatsapp.js')
+  const waCh = new WhatsAppChannel('phoneId', 'tok')
+  await waCh.start(async () => null)
+  const server = startWebhookServer([waCh], 0)
+  await new Promise(resolve => server.once('listening', resolve))
+  const { port } = server.address()
+  try {
+    const url = `http://localhost:${port}/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=p3-verify-token&hub.challenge=roundtrip42`
+    const res = await fetch(url)
+    assert.equal(res.status, 200, 'correct token → 200')
+    assert.equal(await res.text(), 'roundtrip42', 'body must be the raw challenge string')
+  } finally {
+    await new Promise(resolve => server.close(resolve))
+    delete process.env.WHATSAPP_VERIFY_TOKEN
+    delete process.env.WHATSAPP_APP_SECRET
+  }
+})
+
+test('whatsapp webhook: GET verify wrong token → 403', async () => {
+  process.env.WHATSAPP_VERIFY_TOKEN = 'p3-verify-token'
+  const { startWebhookServer } = await import('../dist/server/webhooks.js')
+  const { WhatsAppChannel } = await import('../dist/channels/whatsapp.js')
+  const waCh = new WhatsAppChannel('phoneId', 'tok')
+  await waCh.start(async () => null)
+  const server = startWebhookServer([waCh], 0)
+  await new Promise(resolve => server.once('listening', resolve))
+  const { port } = server.address()
+  try {
+    const url = `http://localhost:${port}/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=WRONG&hub.challenge=roundtrip42`
+    const res = await fetch(url)
+    assert.equal(res.status, 403, 'wrong token → 403')
+  } finally {
+    await new Promise(resolve => server.close(resolve))
+    delete process.env.WHATSAPP_VERIFY_TOKEN
+  }
+})
+
+test('whatsapp webhook: POST correct signature → 200', async () => {
+  const secret = 'p3-app-secret-post'
+  process.env.WHATSAPP_APP_SECRET = secret
+  const { startWebhookServer } = await import('../dist/server/webhooks.js')
+  const { WhatsAppChannel } = await import('../dist/channels/whatsapp.js')
+  const waCh = new WhatsAppChannel('phoneId', 'tok')
+  await waCh.start(async () => null)
+  const server = startWebhookServer([waCh], 0)
+  await new Promise(resolve => server.once('listening', resolve))
+  const { port } = server.address()
+  try {
+    const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [] })
+    const hmac = crypto.createHmac('sha256', secret).update(Buffer.from(body, 'utf-8')).digest('hex')
+    const res = await fetch(`http://localhost:${port}/whatsapp/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-hub-signature-256': `sha256=${hmac}` },
+      body,
+    })
+    assert.equal(res.status, 200, 'valid signature + empty payload → 200')
+  } finally {
+    await new Promise(resolve => server.close(resolve))
+    delete process.env.WHATSAPP_APP_SECRET
+  }
+})
+
+test('whatsapp webhook: POST wrong signature → 401', async () => {
+  process.env.WHATSAPP_APP_SECRET = 'p3-app-secret-post'
+  const { startWebhookServer } = await import('../dist/server/webhooks.js')
+  const { WhatsAppChannel } = await import('../dist/channels/whatsapp.js')
+  const waCh = new WhatsAppChannel('phoneId', 'tok')
+  await waCh.start(async () => null)
+  const server = startWebhookServer([waCh], 0)
+  await new Promise(resolve => server.once('listening', resolve))
+  const { port } = server.address()
+  try {
+    const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [] })
+    const res = await fetch(`http://localhost:${port}/whatsapp/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-hub-signature-256': 'sha256=badhash00000000000000000000000000000000000000000000000000000000' },
+      body,
+    })
+    assert.equal(res.status, 401, 'bad signature → 401')
+  } finally {
+    await new Promise(resolve => server.close(resolve))
+    delete process.env.WHATSAPP_APP_SECRET
+  }
+})
