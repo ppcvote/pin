@@ -61,7 +61,11 @@ metadata:
             「{{data.text}}」
 
             — Ultra Advisor
+
+            👉 做成圖卡轉發給客戶：
           follow_up_urls:
+            - label: 🎨 做今日金句圖卡
+              url: "https://ultra-advisor.tw/?tab=share"
             - label: 🌐 開啟 Ultra Advisor
               url: "https://ultra-advisor.tw/"
       # —— 預留（PPC 2026-06-13 指示）——
@@ -83,7 +87,11 @@ metadata:
             「{{data.text}}」
 
             — Ultra Advisor
+
+            👉 做成圖卡，一鍵轉發給你的客戶 👇
           buttons:
+            - label: 🎨 做今日金句圖卡
+              url: "https://ultra-advisor.tw/?tab=share"
             - label: 🌐 開啟 Ultra Advisor
               url: "https://ultra-advisor.tw/"
 ---
