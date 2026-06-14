@@ -85,7 +85,9 @@ metadata:
 
             想建立這個物件嗎?
           confirm_action: confirm_create_from_photo
-          content_path: "response"
+          # No content_path → the confirm gets the whole from-photo response object
+          # (the draft) as `content`. (content_path: response was wrong — pathLookup
+          # walked INTO response.response → undefined → draft was lost.)
 
       - id: confirm_create_from_photo
         label: 從 photo draft 建物件
