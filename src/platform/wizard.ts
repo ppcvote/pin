@@ -285,9 +285,15 @@ export async function processWizardCallback(user: UserRecord, callbackData: stri
       await saveUser(user)
       return { kind: 'error', text: `confirm_action "${action.preview.confirm_action}" not found` }
     }
+    // Forward the preview content to the confirm action. content_path can extract
+    // a structured object (e.g. udhouse from-photo draft) — JSON-stringify it so the
+    // backend can parse it; only fall back to the rendered text when there's no object.
+    const _pc = state.preview?.content
     const confirmArgs: Record<string, string> = {
       ...state.collected,
-      content: typeof state.preview?.content === 'string' ? state.preview.content : (state.preview?.rawText ?? ''),
+      content: typeof _pc === 'string'
+        ? _pc
+        : (_pc != null ? JSON.stringify(_pc) : (state.preview?.rawText ?? '')),
     }
     const r = await executeAction(skill, confirmAction, confirmArgs)
     user.wizard = undefined
