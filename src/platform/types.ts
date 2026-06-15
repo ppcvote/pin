@@ -78,6 +78,9 @@ export interface RespondSpec {
   find_one?: FindOneSpec               // post-API filter; matched item exposed as {{found}}
   follow_up_actions?: FollowUpAction[] // action buttons appended after the rendered text
   follow_up_urls?: FollowUpUrl[]       // URL buttons (open external link)
+  /** Buttons that open ANOTHER skill's menu (callback s:<skill>). Lets a hub
+   *  skill (e.g. admin-hub) route into a hidden skill (e.g. udhouse-admin). */
+  follow_up_skills?: Array<{ label: string; skill: string }>
   summarize_with?: string              // LLM prompt for unpredictable shapes
 }
 
@@ -162,6 +165,10 @@ export interface PinExtension {
   bind_url?: string
   /** When true, skill is only visible to users confirmed as admin via the identity probe. */
   requires_admin?: boolean
+  /** When true, skill is reachable (via s:<id> from another skill) but does NOT
+   *  appear as its own item in the root menu — used to fold a product's admin
+   *  skill into the admin-hub instead of floating separately. */
+  hide_from_root?: boolean
 }
 
 export interface Skill {

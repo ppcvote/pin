@@ -16,8 +16,10 @@ export function rootMenu(
   const skills = allSkills()
   const bound = new Set(boundSkillIds)
   const adminGranted = new Set(adminGrantedSkillIds)
-  // Admin-gated skills are always filtered, regardless of binding state
-  const visibleSkills = skills.filter(s => !s.pin?.requires_admin || adminGranted.has(s.id))
+  // Admin-gated skills are always filtered, regardless of binding state.
+  // hide_from_root skills never list at root (reached via a hub, e.g. admin-hub).
+  const visibleSkills = skills.filter(s =>
+    !s.pin?.hide_from_root && (!s.pin?.requires_admin || adminGranted.has(s.id)))
 
   const buttons: InlineButton[][] = []
   buttons.push([{ text: '🃏 看我的 Agent', callback_data: 'card' }])

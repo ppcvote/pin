@@ -55,6 +55,19 @@ metadata:
           follow_up_urls:
             - label: 🔓 開啟 MindThread 後台
               url: "https://mindthread.tw/admin"
+      - id: udhouse_admin
+        label: 🏠 UD House 後台
+        description: Open UD House platform admin (cross-realtor overview / listings / leads / agents).
+        args: []
+        api:
+          method: GET
+          url: "https://ultra-advisor.tw/manifest.json"
+        respond:
+          template: |
+            🏠 UD House 管理後台（跨房仲：平台總覽 / 物件 / leads / 房仲名冊）
+          follow_up_skills:
+            - label: 🛠 進 UD House 後台
+              skill: udhouse-admin
 ---
 
 # admin-hub skill (for LLM agents)

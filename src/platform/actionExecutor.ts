@@ -182,8 +182,12 @@ export async function executeAction(
       if (action.respond?.choices) {
         choices = buildChoices(skill.id, action.respond.choices, data, raw)
       }
-      if (action.respond?.follow_up_actions || action.respond?.follow_up_urls) {
+      if (action.respond?.follow_up_actions || action.respond?.follow_up_urls || action.respond?.follow_up_skills) {
         followUps = []
+        for (const fs of action.respond.follow_up_skills ?? []) {
+          if (!fs.skill || !fs.label) continue
+          followUps.push({ text: fs.label.slice(0, 40), callback_data: `s:${fs.skill}` })
+        }
         for (const fu of action.respond.follow_up_actions ?? []) {
           const targetAction = skill.pin?.actions.find(x => x.id === fu.action)
           if (!targetAction) continue

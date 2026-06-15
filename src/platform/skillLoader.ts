@@ -79,6 +79,7 @@ export function loadSkill(skillDir: string): Skill {
         connect_url: fm.metadata.pin.connect_url,
         bind_url: fm.metadata.pin.bind_url,
         requires_admin: fm.metadata.pin.requires_admin === true,
+        hide_from_root: fm.metadata.pin.hide_from_root === true,
         webhooks: (fm.metadata.pin.webhooks ?? []).map((w: any) => ({
           event: w.event,
           secret: w.secret,

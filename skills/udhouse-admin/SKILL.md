@@ -12,6 +12,9 @@ metadata:
     icon: 🛠
     primary_color: "#7C3AED"
     requires_admin: true
+    # 不在根選單單獨露出；由 admin-hub（管理後台）的「UD House 後台」入口進來，
+    # 跟其他產品一致。仍可用 s:udhouse-admin 開。
+    hide_from_root: true
     secrets:
       - UDH_API_KEY
       - UDH_BASE_URL
