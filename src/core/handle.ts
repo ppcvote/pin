@@ -16,6 +16,8 @@ import { saveUser } from '../storage/jsonStore.js'
 import { reportBound } from '../runtime/flywheelReporter.js'
 import { agentRoute, isAgentModeEnabled } from '../brain/agentRouter.js'
 import { recentHistory } from '../brain/memory.js'
+import { scanRedline, reportRedlineViolation } from '../persona/redline.js'
+import { resolveMode, contextFromAction } from '../persona/mode.js'
 import type { InboundMessage, OutboundReply, Button, ThemeHint } from '../channels/types.js'
 
 const NAV_ROW = (skillId?: string): Button[] => skillId
@@ -67,7 +69,7 @@ function welcomeScreen(displayName: string, adminGrants: string[] = [], viewerKe
     `現有 skill (${skills.length} 個):`,
     skillNames,
     '',
-    '點下面任一個馬上試 ↓',
+    '點下面任一個直接試 ↓',
   ].join('\n')
 
   const buttons: Button[][] = []
@@ -488,6 +490,12 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       const result = await executeAction(skill, action, parsed.args)
       // Count button-driven actions only (wizard ones get counted when finalized)
       await incrementStat(userKey, 'actions')
+      // PIN_PERSONA §1 — resolve mode from action context (already scanned in actionExecutor)
+      const _mode = resolveMode(contextFromAction({
+        hasPreview: !!action.preview,
+        httpMethod: action.api?.method,
+        renderedText: result.rendered,
+      }))
       const text = result.ok
         ? (result.rendered ?? JSON.stringify(result.raw).slice(0, 1000))
         : `${action.label} 失敗 😢\n${result.error}`
@@ -787,6 +795,12 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       }
       const result = await executeAction(skill, action, decision.args ?? {})
       await incrementStat(userKey, 'actions')
+      // PIN_PERSONA §1 — determine mode from this action's context (result already scanned)
+      const _agentMode = resolveMode(contextFromAction({
+        hasPreview: !!action.preview,
+        httpMethod: action.api?.method,
+        renderedText: result.rendered,
+      }))
       const replyText = result.ok
         ? (result.rendered ?? '✅ 完成')
         : `${action.label} 失敗: ${result.error}`
@@ -807,10 +821,16 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       })
       candidateButtons.push([{ text: '🏠 主選單', callback_data: 'm:root' }])
       await appendHistory(userKey, 'assistant', decision.question, msg.userDisplayName, msg.userHandle)
+      // PIN_PERSONA §8 — scan LLM clarification text for redline violations
+      const _clarifyScan = scanRedline(decision.question)
+      if (!_clarifyScan.passed) reportRedlineViolation(`agent:clarify user=${userKey}`, _clarifyScan.hits)
       return { text: `${decision.question}\n\n🧠×1`, buttons: candidateButtons }
     }
     if (decision.kind === 'none') {
       await appendHistory(userKey, 'assistant', decision.reply, msg.userDisplayName, msg.userHandle)
+      // PIN_PERSONA §8 — scan LLM none-reply text for redline violations
+      const _noneScan = scanRedline(decision.reply)
+      if (!_noneScan.passed) reportRedlineViolation(`agent:none user=${userKey}`, _noneScan.hits)
       return { text: `${decision.reply}\n\n或從選單操作 👇  🧠×1`,
                buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
     }

@@ -84,6 +84,11 @@ export interface UserRecord {
     args: Record<string, any>
     expiresAt: string
   }
+  /** PERSONA §2 — daily easter egg counter (keyed by Asia/Taipei date YYYY-MM-DD). */
+  persona_eggs?: {
+    dayKey: string
+    count: number
+  }
 }
 
 export interface Reminder {

@@ -1134,3 +1134,222 @@ test('apply/deeplink: /start apply enters the apply flow', async () => {
   const u = await loadUser('tg:' + uid)
   assert.equal(u?.apply?.step, 'await_url', 'apply conversation should be armed')
 })
+
+// ── PIN_PERSONA §8 — Redline scanner (工單 11) ────────────────────────────────
+
+const { scanRedline } = await import('../dist/persona/redline.js')
+
+test('redline: clean Traditional Chinese text passes', () => {
+  const result = scanRedline('好的，幫你查一下這週的房源列表。')
+  assert.equal(result.passed, true, `should pass but got hits: ${result.hits.join(', ')}`)
+  assert.equal(result.hits.length, 0)
+})
+
+test('redline: all forbidden words are detected', () => {
+  const forbiddenWords = ['立即', '馬上', '為您', '賦能', '打造']
+  for (const word of forbiddenWords) {
+    const result = scanRedline(`我們${word}幫你處理這件事。`)
+    assert.equal(result.passed, false, `"${word}" should be flagged`)
+    assert.ok(result.hits.some(h => h.includes(word)), `hits should mention "${word}"`)
+  }
+})
+
+test('redline: salesy 親 vocative flagged, but compound 親-words must pass (FP guard)', () => {
+  // 淘寶式稱呼語 → 攔
+  for (const t of ['親，幫你查一下', '親！', '親 你好']) {
+    assert.equal(scanRedline(t).passed, false, `vocative 親 in "${t}" should flag`)
+  }
+  // 含「親」的正常詞 → 絕不誤傷（含人格自己的「親切模式」）
+  for (const t of ['親切地幫你處理好了', '父親的房子已經登錄', '這位是你的親友', '我親自確認過了', '雙親都很滿意']) {
+    const r = scanRedline(t)
+    assert.equal(r.passed, true, `"${t}" should pass but got: ${r.hits.join(', ')}`)
+  }
+})
+
+test('redline: 不是X而是Y sentence pattern is detected', () => {
+  const text = '不是一般 AI 而是懂你生意的秘書'
+  const result = scanRedline(text)
+  assert.equal(result.passed, false, '不是X而是Y must be flagged')
+  assert.ok(result.hits.some(h => h.includes('禁句型')), 'hit should mention 禁句型')
+})
+
+test('redline: 不是X而是Y not falsely matched on unrelated text', () => {
+  const clean = '這是一個不是人寫的提案，而且品質很高。'
+  const result = scanRedline(clean)
+  // This should NOT match — "不是...而且" is different from "不是...而是"
+  assert.ok(!result.hits.some(h => h.includes('禁句型')), 'should not falsely flag 不是...而且')
+})
+
+test('redline: simplified Chinese characters are detected', () => {
+  // 们 过 还 说 这 来 时 对 会 — all simplified-only
+  for (const [simplified, label] of [['们好', '们'], ['这是', '这'], ['来自', '来']]) {
+    const result = scanRedline(simplified)
+    assert.equal(result.passed, false, `simplified char "${label}" should be flagged`)
+    assert.ok(result.hits.some(h => h.includes('簡體字')), `hits should mention 簡體字 for "${label}"`)
+  }
+})
+
+test('redline: Traditional Chinese characters are not falsely flagged', () => {
+  const traditional = '你好，幫你查詢今日物件清單。共 3 筆，從最新排列：'
+  const result = scanRedline(traditional)
+  assert.ok(!result.hits.some(h => h.includes('簡體字')), 'Traditional Chinese must not trigger simplified detector')
+})
+
+test('redline: cute/sexualized markers are detected', () => {
+  for (const marker of ['親親你', '好棒棒', '乖乖等我']) {
+    const result = scanRedline(`${marker}，幫你辦好了！`)
+    assert.equal(result.passed, false, `cute marker "${marker}" should be flagged`)
+    assert.ok(result.hits.some(h => h.includes('賣萌')), `hits should mention 賣萌 for "${marker}"`)
+  }
+})
+
+test('redline: trailing ~ cute tone is detected', () => {
+  const result = scanRedline('好的哦~~~已經幫你查好了')
+  assert.equal(result.passed, false, '哦~~~ cute tone should be flagged')
+  assert.ok(result.hits.some(h => h.includes('賣萌')))
+})
+
+test('redline: more than 1 exclamation mark is flagged', () => {
+  const result = scanRedline('完成了！太好了！辦到了！')
+  assert.equal(result.passed, false, 'more than 1 exclamation should be flagged')
+  assert.ok(result.hits.some(h => h.includes('驚嘆號')), `hits: ${result.hits.join(', ')}`)
+})
+
+test('redline: exactly 1 exclamation mark is allowed', () => {
+  const result = scanRedline('幫你辦完了！')
+  assert.ok(!result.hits.some(h => h.includes('驚嘆號')), 'single exclamation mark is allowed')
+})
+
+test('redline: multiple hit types in one message are all reported', () => {
+  const text = '親，立即為您賦能！！這来自我们的平台！'
+  const result = scanRedline(text)
+  assert.equal(result.passed, false)
+  // Should hit: 親, 立即, 為您, 賦能, 簡體字(来/们), 驚嘆號
+  assert.ok(result.hits.length >= 4, `expected ≥4 hits, got ${result.hits.length}: ${result.hits.join(' / ')}`)
+})
+
+// ── PIN_PERSONA §1 — Mode resolver (工單 11) ─────────────────────────────────
+
+const { resolveMode, textHasNumericData, contextFromAction } = await import('../dist/persona/mode.js')
+
+test('mode resolver: GET action → friendly', () => {
+  assert.equal(resolveMode({ httpMethod: 'GET' }), 'friendly')
+})
+
+test('mode resolver: POST action → serious', () => {
+  assert.equal(resolveMode({ httpMethod: 'POST' }), 'serious')
+})
+
+test('mode resolver: PUT action → serious', () => {
+  assert.equal(resolveMode({ httpMethod: 'PUT' }), 'serious')
+})
+
+test('mode resolver: DELETE action → serious', () => {
+  assert.equal(resolveMode({ httpMethod: 'DELETE' }), 'serious')
+})
+
+test('mode resolver: preview/confirm action → serious regardless of method', () => {
+  assert.equal(resolveMode({ hasPreviewConfirm: true, httpMethod: 'GET' }), 'serious')
+})
+
+test('mode resolver: numeric data in response → serious', () => {
+  assert.equal(resolveMode({ hasNumericData: true }), 'serious')
+})
+
+test('mode resolver: customer data context → serious', () => {
+  assert.equal(resolveMode({ hasCustomerData: true }), 'serious')
+})
+
+test('mode resolver: no context → friendly', () => {
+  assert.equal(resolveMode({}), 'friendly')
+})
+
+test('mode resolver: forceMode overrides all signals', () => {
+  assert.equal(resolveMode({ httpMethod: 'DELETE', forceMode: 'friendly' }), 'friendly')
+  assert.equal(resolveMode({ httpMethod: 'GET', forceMode: 'serious' }), 'serious')
+})
+
+test('textHasNumericData: prices and counts', () => {
+  assert.equal(textHasNumericData('NT$2,990 起'), true, 'NT$ price')
+  assert.equal(textHasNumericData('共 5 筆物件'), true, '筆 count')
+  assert.equal(textHasNumericData('2026-06-15 上架'), true, 'ISO date')
+  assert.equal(textHasNumericData('已完成'), false, 'no numeric data')
+})
+
+test('contextFromAction: POST with rendered numbers → serious', () => {
+  const ctx = contextFromAction({
+    hasPreview: false,
+    httpMethod: 'POST',
+    renderedText: '已建立物件，售價 NT$28,000,000',
+  })
+  assert.equal(resolveMode(ctx), 'serious')
+})
+
+test('contextFromAction: GET with no numbers → friendly', () => {
+  const ctx = contextFromAction({
+    hasPreview: false,
+    httpMethod: 'GET',
+    renderedText: '查詢完成',
+  })
+  assert.equal(resolveMode(ctx), 'friendly')
+})
+
+// ── PIN_PERSONA §2 — Easter eggs (工單 11) ────────────────────────────────────
+
+const { maybeEasterEgg, EASTER_MOMENTS } = await import('../dist/persona/easter.js')
+
+test('easter: serious mode always returns null', () => {
+  for (const moment of EASTER_MOMENTS) {
+    assert.equal(maybeEasterEgg(moment, 'serious'), null, `moment=${moment} must be null in serious mode`)
+  }
+})
+
+test('easter: friendly mode returns a string for all safe moments', () => {
+  for (const moment of EASTER_MOMENTS) {
+    const egg = maybeEasterEgg(moment, 'friendly')
+    assert.ok(typeof egg === 'string' && egg.length > 0, `moment=${moment} should return a string in friendly mode`)
+  }
+})
+
+test('easter: disabled config returns null', () => {
+  for (const moment of EASTER_MOMENTS) {
+    assert.equal(maybeEasterEgg(moment, 'friendly', { enabled: false }), null, `disabled config must suppress all eggs`)
+  }
+})
+
+test('easter: PIN_EASTER_EGGS=false env disables eggs', () => {
+  const prev = process.env.PIN_EASTER_EGGS
+  process.env.PIN_EASTER_EGGS = 'false'
+  try {
+    for (const moment of EASTER_MOMENTS) {
+      assert.equal(maybeEasterEgg(moment, 'friendly'), null, `env-disabled must suppress ${moment}`)
+    }
+  } finally {
+    if (prev === undefined) delete process.env.PIN_EASTER_EGGS
+    else process.env.PIN_EASTER_EGGS = prev
+  }
+})
+
+test('easter: rotation cycles through pool without repeating immediately', () => {
+  const egg0 = maybeEasterEgg('morning', 'friendly', {}, 0)
+  const egg1 = maybeEasterEgg('morning', 'friendly', {}, 1)
+  const egg2 = maybeEasterEgg('morning', 'friendly', {}, 2)
+  // With a 3-item pool, index 0 and 3 should be the same (cycle)
+  const egg3 = maybeEasterEgg('morning', 'friendly', {}, 3)
+  assert.equal(egg0, egg3, 'rotation should cycle: index 0 = index pool.length')
+  // At least two distinct values in the pool (variety check)
+  const distinct = new Set([egg0, egg1, egg2])
+  assert.ok(distinct.size >= 2, `morning pool should have ≥2 distinct eggs, got: ${[...distinct].join(' | ')}`)
+})
+
+test('easter: easter eggs pass their own redline scanner', () => {
+  for (const moment of EASTER_MOMENTS) {
+    const pool = Array.from({ length: 5 }, (_, i) => maybeEasterEgg(moment, 'friendly', {}, i))
+    for (const egg of pool) {
+      if (!egg) continue
+      const scan = scanRedline(egg)
+      assert.equal(scan.passed, true,
+        `Easter egg for ${moment} failed redline: ${scan.hits.join(', ')} | text: "${egg}"`)
+    }
+  }
+})
