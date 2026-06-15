@@ -77,42 +77,31 @@ export class TelegramChannel implements Channel {
         return
       }
 
-      const mediaGroupId: string | undefined = (msg as any).media_group_id
-      if (mediaGroupId) {
-        const key = `${ctx.chat.id}:${mediaGroupId}`
-        const existing = pendingAlbums.get(key)
-        if (existing) {
-          clearTimeout(existing.timer)
-          existing.images.push(image)
-          if (existing.images.length >= ALBUM_MAX_PHOTOS) {
-            // Hit max — dispatch immediately without waiting for debounce
-            pendingAlbums.delete(key)
-            await this.dispatch(existing.ctx, { images: existing.images }).catch(e => console.error('[tg album dispatch]', e))
-            return
-          }
-          // Reset debounce window
-          existing.timer = setTimeout(async () => {
-            pendingAlbums.delete(key)
-            await this.dispatch(existing.ctx, { images: existing.images }).catch(e => console.error('[tg album dispatch]', e))
-          }, ALBUM_DEBOUNCE_MS)
-        } else {
-          // First photo of this album
-          const entry: AlbumEntry = {
-            images: [image],
-            ctx,
-            timer: setTimeout(async () => {
-              const e = pendingAlbums.get(key)
-              if (!e) return
-              pendingAlbums.delete(key)
-              await this.dispatch(e.ctx, { images: e.images }).catch(err => console.error('[tg album dispatch]', err))
-            }, ALBUM_DEBOUNCE_MS),
-          }
-          pendingAlbums.set(key, entry)
-        }
-      } else {
-        // Single photo (no album grouping) — dispatch immediately
-        await this.dispatch(ctx, { image })
+      await this.routeImage(ctx, msg, image)
+    })
+
+    // Image sent as a FILE/document (uncompressed original) — full-resolution
+    // path so realtors can send 原圖 for sharper vision recognition than the
+    // compressed photo TG produces on a normal send.
+    this.bot.on('document', async (ctx) => {
+      if (ctx.chat.type !== 'private') return
+      const msg = ctx.message
+      const doc = (msg as any).document
+      const mime: string = doc?.mime_type ?? ''
+      if (!doc || !mime.startsWith('image/')) return  // only image files; ignore other docs
+      let image: InboundImage
+      try {
+        const link = await ctx.telegram.getFileLink(doc.file_id)
+        const res = await fetch(link.href)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const buf = Buffer.from(await res.arrayBuffer())
+        image = { data: buf, mime }
+      } catch (err) {
+        console.error('[tg document download]', err)
+        try { await ctx.reply('檔案下載失敗 😢，請重試') } catch {}
+        return
       }
+      await this.routeImage(ctx, msg, image)
     })
 
     // Don't await — telegraf.launch() in long-polling mode resolves only when bot stops.
@@ -137,6 +126,43 @@ export class TelegramChannel implements Channel {
     const id = Number(userId)
     if (Number.isNaN(id)) return
     await this.bot.telegram.sendPhoto(id, { source: png }, caption ? { caption: caption.slice(0, 1024) } : undefined)
+  }
+
+  /** Route one inbound image — album-debounce if part of a media_group, else
+   *  dispatch immediately. Shared by the photo and document (file) handlers. */
+  private async routeImage(ctx: any, msg: any, image: InboundImage): Promise<void> {
+    const mediaGroupId: string | undefined = msg?.media_group_id
+    if (mediaGroupId) {
+      const key = `${ctx.chat.id}:${mediaGroupId}`
+      const existing = pendingAlbums.get(key)
+      if (existing) {
+        clearTimeout(existing.timer)
+        existing.images.push(image)
+        if (existing.images.length >= ALBUM_MAX_PHOTOS) {
+          pendingAlbums.delete(key)
+          await this.dispatch(existing.ctx, { images: existing.images }).catch(e => console.error('[tg album dispatch]', e))
+          return
+        }
+        existing.timer = setTimeout(async () => {
+          pendingAlbums.delete(key)
+          await this.dispatch(existing.ctx, { images: existing.images }).catch(e => console.error('[tg album dispatch]', e))
+        }, ALBUM_DEBOUNCE_MS)
+      } else {
+        const entry: AlbumEntry = {
+          images: [image],
+          ctx,
+          timer: setTimeout(async () => {
+            const e = pendingAlbums.get(key)
+            if (!e) return
+            pendingAlbums.delete(key)
+            await this.dispatch(e.ctx, { images: e.images }).catch(err => console.error('[tg album dispatch]', err))
+          }, ALBUM_DEBOUNCE_MS),
+        }
+        pendingAlbums.set(key, entry)
+      }
+    } else {
+      await this.dispatch(ctx, { image })
+    }
   }
 
   private async dispatch(

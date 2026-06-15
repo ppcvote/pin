@@ -64,7 +64,7 @@ metadata:
             label: 物件照片
             type: image
             input: attachment
-            placeholder: 可拍多張或選相簿（最多 8 張）
+            placeholder: 可拍多張或選相簿（最多 8 張）；想辨識更準可改用「檔案」傳原圖（不壓縮）
         api:
           method: POST
           url: "{UDH_BASE_URL}/api/v1/listings/from-photo"
