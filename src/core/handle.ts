@@ -134,8 +134,17 @@ function wizardOutcomeToReply(outcome: WizardOutcome, skill?: { pin?: { primary_
     title: skill.name,
   } : undefined
   const buttons = (outcome as any).buttons as Button[] | undefined
-  const keyboard = buttons && buttons.length > 0 ? [buttons] : undefined
+  // Lay wizard buttons out 2-per-row instead of one cramped row — a single
+  // long row shrinks each button so its label (esp. Chinese) is unreadable.
+  const keyboard = buttons && buttons.length > 0 ? chunkButtons(buttons, 2) : undefined
   return { text: outcome.text, buttons: keyboard, theme }
+}
+
+/** Split a flat button list into rows of at most `perRow` (keeps labels readable). */
+function chunkButtons(arr: Button[], perRow: number): Button[][] {
+  const rows: Button[][] = []
+  for (let i = 0; i < arr.length; i += perRow) rows.push(arr.slice(i, i + perRow))
+  return rows
 }
 
 export async function handlePinMessage(msg: InboundMessage): Promise<OutboundReply | null> {
