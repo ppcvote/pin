@@ -533,6 +533,43 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
   const text = (msg.text ?? '').trim()
   if (!text) return null
 
+  // ULTRASITE 名片認領 — /start us_{token}：回打 UltraLab claim，把這頁的諮詢回流綁給我。
+  const usMatch = text.match(/^\/start\s+us_([a-f0-9]{12,32})\s*$/i)
+  if (usMatch) {
+    const token = usMatch[1].toLowerCase()
+    try {
+      const r = await fetch('https://ultralab.tw/api/probe-scan', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'ultrasite-claim', token,
+          channelType: msg.channelId === 'tg' ? 'telegram' : msg.channelId,
+          channelId: msg.userId,
+        }),
+      })
+      const d: any = await r.json().catch(() => ({}))
+      if (r.ok && d?.ok) {
+        return { text: `✅ 這頁現在歸你了${d.name ? `（${d.name}）` : ''}。有人在上面留訊息，我第一時間轉給你。` }
+      }
+      return { text: '🔒 這個連結已失效或已被認領。回名片頁重新點「把 Pin 留下」就好。' }
+    } catch {
+      return { text: '網絡有點不順，等一下再點一次。' }
+    }
+  }
+
+  // 域名升級 — /start domain：開 GENESIS 域名 skill（查 / 比價 / 註冊）。
+  if (/^\/start\s+domain\s*$/i.test(text)) {
+    const skill = findSkill('domain')
+    if (skill) {
+      const view = skillMenu(skill.id)
+      return {
+        text: '🌐 想要自己的網域？我幫你查可不可以用、比個價，要的話直接幫你註冊。',
+        buttons: view?.buttons,
+        theme: { primaryColor: skill.pin?.primary_color, icon: skill.pin?.icon ?? '🌐', title: skill.name },
+      }
+    }
+    return { text: '🌐 域名功能正在上線中，晚點再來。' }
+  }
+
   // Bind-token redemption — supports two forms:
   //   - LINE: user opens prefilled message "bind <token>"
   //   - TG:   /start <token> (telegraf passes the payload as the message text)
