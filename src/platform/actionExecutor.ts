@@ -2,6 +2,7 @@ import { httpRequest } from '../products/httpRequest.js'
 import { render } from './template.js'
 import { readTempBlob } from '../runtime/tempStore.js'
 import { shortenCallback } from '../runtime/callbackRefs.js'
+import { scanRedline, reportRedlineViolation } from '../persona/redline.js'
 import type { ActionDef, ApiSpec, Skill, ChoiceSpec } from './types.js'
 
 /**
@@ -178,6 +179,14 @@ export async function executeAction(
       let followUps: { text: string; callback_data?: string; url?: string }[] | undefined
       if (action.respond?.template) {
         rendered = render(action.respond.template, scope)
+        // PIN_PERSONA §8 — redline scan on every rendered outbound template.
+        // Hits are logged immediately; never silently ignored.
+        if (rendered) {
+          const scan = scanRedline(rendered)
+          if (!scan.passed) {
+            reportRedlineViolation(`action=${skill.id}/${action.id}`, scan.hits)
+          }
+        }
       }
       if (action.respond?.choices) {
         choices = buildChoices(skill.id, action.respond.choices, data, raw)
