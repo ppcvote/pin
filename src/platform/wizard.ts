@@ -334,7 +334,13 @@ export async function processWizardCallback(user: UserRecord, callbackData: stri
     user.wizard = undefined
     await saveUser(user)
     if (!r.ok) return { kind: 'error', text: `${confirmAction.label} 失敗: ${r.error}` }
-    return { kind: 'done', text: r.rendered ?? '✅ 完成' }
+    // Carry the confirm action's follow-up / choice buttons (e.g. a one-tap
+    // "✍️ AI 生廣告文" after creating the listing).
+    const doneButtons: WizardButton[] = [
+      ...(r.followUps ?? []).map(f => ({ text: f.text, callback_data: f.callback_data, url: f.url })),
+      ...(r.choices ?? []).map(c => ({ text: c.text, callback_data: c.callback_data })),
+    ]
+    return { kind: 'done', text: r.rendered ?? '✅ 完成', buttons: doneButtons.length ? doneButtons : undefined }
   }
 
   // Retry — re-run main action with same collected args

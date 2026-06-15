@@ -172,8 +172,14 @@ metadata:
         respond:
           template: |
             ✅ 物件已建立
-            🆔 listing id: {{data.id}}
+            📝 {{data.title}}
+            ✍️ {{data.description}}
             🔗 {{data.share_url}}
+          follow_up_actions:
+            - action: generate_promo
+              label: ✍️ 生更正式的廣告文（可多語）
+              args:
+                listing_id: "{{data.id}}"
 
       - id: list_listings
         label: 看所有物件
