@@ -392,8 +392,41 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
         return { text: '此 skill 沒有可綁定的通知事件' }
       }
       try {
-        const token = await createBindingToken(userKey, skillId)
         const eventLines = skill.pin.webhooks.map(w => `· ${w.event}`).join('\n')
+        const chLabel = msg.channelId === 'line' ? 'LINE' : 'TG'
+        const theme: ThemeHint = {
+          primaryColor: skill.pin?.primary_color,
+          icon: skill.pin?.icon,
+          title: skill.name,
+        }
+
+        // Preferred path: the product has a 後台「整合/連接 Pin」page that runs the
+        // bind itself (one tap). Give a direct link there — no paste-this-code.
+        if (skill.pin?.bind_url) {
+          const text = [
+            `🔔 ${skill.name} 通知綁定`,
+            '',
+            `到 ${skill.name} 後台一鍵連接 Pin 👇`,
+            `（已登入後台的話，點「連接 Pin」就好）`,
+            '',
+            `連接後，這些事件會推到你 ${chLabel}:`,
+            eventLines,
+          ].join('\n')
+          return {
+            text,
+            buttons: [
+              [{ text: '🔗 去後台連接 Pin', url: skill.pin.bind_url }],
+              [
+                { text: `⬅️ ${skill.name}`, callback_data: `s:${skill.id}` },
+                { text: '🏠 主選單', callback_data: 'm:root' },
+              ],
+            ],
+            theme,
+          }
+        }
+
+        // Legacy fallback: skills without a 後台 bind page get the paste-a-code flow.
+        const token = await createBindingToken(userKey, skillId)
         const text = [
           `🔔 ${skill.name} 通知綁定`,
           '',
@@ -406,14 +439,9 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
           `1. 到 ${skill.name} 後台`,
           `2. 找「Pin 綁定」設定`,
           `3. 貼上上面這串`,
-          `4. 之後這些事件會推到你 ${msg.channelId === 'line' ? 'LINE' : 'TG'}:`,
+          `4. 之後這些事件會推到你 ${chLabel}:`,
           eventLines,
         ].join('\n')
-        const theme: ThemeHint = {
-          primaryColor: skill.pin?.primary_color,
-          icon: skill.pin?.icon,
-          title: skill.name,
-        }
         return {
           text,
           buttons: [[

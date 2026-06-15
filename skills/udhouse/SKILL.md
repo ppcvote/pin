@@ -10,6 +10,8 @@ metadata:
     version: "1.0"
     icon: 🏠
     primary_color: "#0EA5E9"
+    # 後台「整合」頁有一鍵「連接 Pin」（deep-link 綁定）。綁定通知直接導去這、不給死碼。
+    bind_url: "https://social.8338.hk/integrations"
     secrets:
       - UDH_API_KEY
       - UDH_BASE_URL
