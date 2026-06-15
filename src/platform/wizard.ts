@@ -47,6 +47,45 @@ function pathLookup(obj: any, path: string): any {
   return cur
 }
 
+/** Set a nested dot-path on an object, creating intermediate objects as needed. */
+function setPath(obj: any, path: string, value: any): void {
+  const parts = path.split('.')
+  let cur = obj
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (cur[parts[i]] == null || typeof cur[parts[i]] !== 'object') cur[parts[i]] = {}
+    cur = cur[parts[i]]
+  }
+  cur[parts[parts.length - 1]] = value
+}
+
+/** Re-render a preview's template from the (possibly edited) content object. */
+function renderPreviewText(action: ActionDef, content: any, collected: Record<string, string>): string {
+  if (!action.preview) return ''
+  const data = (content && typeof content === 'object' && 'data' in content) ? content.data : content
+  return render(action.preview.template, { response: content, data, args: collected, found: undefined, more_count: 0 })
+}
+
+/** Buttons shown under a preview. Adds「✏️ 修改」when the action declares editable_fields. */
+function previewButtons(action: ActionDef): WizardButton[] {
+  const btns: WizardButton[] = [{ text: '✅ 確認發', callback_data: 'wz:confirm' }]
+  if (action.preview?.editable_fields?.length) btns.push({ text: '✏️ 修改', callback_data: 'wz:edit' })
+  btns.push({ text: '🔄 重生', callback_data: 'wz:retry' })
+  btns.push({ text: '❌ 取消', callback_data: 'wz:cancel' })
+  return btns
+}
+
+/** The tap-to-edit field menu: one button per editable field + publish/cancel. */
+function editMenuButtons(action: ActionDef): WizardButton[] {
+  const fields = action.preview?.editable_fields ?? []
+  const btns: WizardButton[] = fields.map((f, i) => ({
+    text: f.label.slice(0, 40),
+    callback_data: shortenCallback(`wz:ef:${i}`),
+  }))
+  btns.push({ text: '✅ 改完發佈', callback_data: 'wz:confirm' })
+  btns.push({ text: '❌ 取消', callback_data: 'wz:cancel' })
+  return btns
+}
+
 /** Pull the array referenced by a from_action arg, so we can render choice buttons.
  *  Path resolution order: arg.from_path → source action's respond.choices.from → top-level. */
 async function fetchChoiceArray(skill: Skill, fromActionId: string, overridePath: string | undefined, args: Record<string, string>): Promise<any[]> {
@@ -185,11 +224,7 @@ async function executeAndMaybePreview(user: UserRecord, skill: Skill, action: Ac
   return {
     kind: 'preview',
     text: previewText,
-    buttons: [
-      { text: '✅ 確認發', callback_data: 'wz:confirm' },
-      { text: '🔄 重生', callback_data: 'wz:retry' },
-      { text: '❌ 取消', callback_data: 'wz:cancel' },
-    ],
+    buttons: previewButtons(action),
   }
 }
 
@@ -305,6 +340,52 @@ export async function processWizardCallback(user: UserRecord, callbackData: stri
   // Retry — re-run main action with same collected args
   if (callbackData === 'wz:retry') {
     return executeAndMaybePreview(user, skill, action, state)
+  }
+
+  // ── Tap-to-edit a preview field (when the action declares editable_fields) ──
+  const editable = action.preview?.editable_fields
+  // Open the edit menu: show the current (possibly edited) draft + a field picker.
+  if (callbackData === 'wz:edit' && editable?.length && state.preview) {
+    state.editing_field = undefined
+    user.wizard = state
+    await saveUser(user)
+    const text = renderPreviewText(action, state.preview.content, state.collected) + '\n\n✏️ 揀要改邊一項:'
+    return { kind: 'preview', text, buttons: editMenuButtons(action) }
+  }
+  // Pick a field to edit → show value buttons (or prompt for free text/number).
+  if (callbackData.startsWith('wz:ef:') && editable?.length && state.preview) {
+    const idx = parseInt(callbackData.slice(6), 10)
+    const field = editable[idx]
+    if (!field) return null
+    if (field.options?.length) {
+      const buttons: WizardButton[] = field.options
+        .filter(o => o.value && o.label)
+        .map(o => ({ text: o.label.slice(0, 40), callback_data: shortenCallback(`wz:sv:${idx}:${encodeURIComponent(o.value)}`) }))
+      buttons.push({ text: '↩️ 返回', callback_data: 'wz:edit' })
+      return { kind: 'prompt_choice', text: `${field.label} — 揀一個:`, buttons }
+    }
+    // Free text / number field
+    state.editing_field = field.path
+    user.wizard = state
+    await saveUser(user)
+    const hint = field.placeholder ? `\n💡 ${field.placeholder}` : ''
+    return { kind: 'prompt_text', text: `📝 ${field.label}:${hint}`, buttons: [{ text: '↩️ 返回', callback_data: 'wz:edit' }] }
+  }
+  // Set a field's value via a tapped option → merge into the draft, re-preview.
+  if (callbackData.startsWith('wz:sv:') && editable?.length && state.preview) {
+    const rest = callbackData.slice(6)
+    const ci = rest.indexOf(':')
+    if (ci < 0) return null
+    const idx = parseInt(rest.slice(0, ci), 10)
+    const value = decodeURIComponent(rest.slice(ci + 1))
+    const field = editable[idx]
+    if (!field) return null
+    setPath(state.preview.content, field.path, value)
+    state.editing_field = undefined
+    user.wizard = state
+    await saveUser(user)
+    const text = renderPreviewText(action, state.preview.content, state.collected) + '\n\n✅ 已更新。仲要改就揀，改完撳「確認發」:'
+    return { kind: 'preview', text, buttons: editMenuButtons(action) }
   }
 
   // Choice arg — format: wz:<arg>:<value>
@@ -435,6 +516,24 @@ export async function processWizardText(user: UserRecord, text: string): Promise
     return { kind: 'error', text: 'Wizard state invalid. Cleared.' }
   }
   const { skill, action } = found
+
+  // Editing a preview field via free text (e.g. price / sqft).
+  if (state.editing_field && state.preview) {
+    const field = action.preview?.editable_fields?.find(f => f.path === state.editing_field)
+    const value = text.trim()
+    if (!value) return { kind: 'error', text: '請輸入內容' }
+    if (field?.input === 'number' && !/\d/.test(value)) {
+      const hint = field.placeholder ? `（例如 ${field.placeholder}）` : ''
+      return { kind: 'prompt_text', text: `📝 ${field.label} 請輸入數字${hint}:`, buttons: [{ text: '↩️ 返回', callback_data: 'wz:edit' }] }
+    }
+    const clean = field?.input === 'number' ? value.replace(/[^\d]/g, '') : value
+    setPath(state.preview.content, state.editing_field, clean)
+    state.editing_field = undefined
+    user.wizard = state
+    await saveUser(user)
+    const t = renderPreviewText(action, state.preview.content, state.collected) + '\n\n✅ 已更新。仲要改就揀，改完撳「確認發」:'
+    return { kind: 'preview', text: t, buttons: editMenuButtons(action) }
+  }
 
   if (state.argIdx >= action.args.length) {
     // Wizard already collected args but expecting confirm callback, not text

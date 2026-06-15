@@ -108,6 +108,7 @@ export function loadSkill(skillDir: string): Skill {
             template: a.preview.template,
             confirm_action: a.preview.confirm_action,
             content_path: a.preview.content_path,
+            editable_fields: a.preview.editable_fields,
           } : undefined,
           gated_by: a.gated_by,
         })),

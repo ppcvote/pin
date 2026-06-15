@@ -33,6 +33,8 @@ export interface WizardState {
   preview?: { content: any; rawText?: string }
   /** tmp: refs accumulated for multi-photo arg (LINE/WA path); committed on wz:img:commit. */
   pending_images?: string[]
+  /** When the user is editing a preview field via free text, the dot-path being edited. */
+  editing_field?: string
   startedAt: string
 }
 

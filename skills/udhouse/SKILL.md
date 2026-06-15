@@ -77,19 +77,83 @@ metadata:
 
             📝 標題: {{response.suggested.suggested_title}}
             🏠 物業類型: {{response.suggested.property_category}}
+            💰 租/售: {{response.suggested.estimated_type}}
             📍 區域: {{response.suggested.estimated_district}}
             🛏 {{response.suggested.estimated_bedrooms}} 房 {{response.suggested.estimated_bathrooms}} 衛
             📐 {{response.suggested.estimated_sqft}} sqft
+            💵 價錢: {{response.suggested.price_hkd}}
             🪟 陽台: {{response.suggested.has_balcony}}
             🎯 信心度: {{response.suggested.confidence}}
 
-            ℹ️ 出租/出售、區域、價錢 AI 看照片判斷不到，建立後你再補上。
+            ℹ️ 出租/出售、區域、價錢 AI 看照片判斷不到 — 撳「✏️ 修改」一鍵點選補上。
 
             想建立這個物件嗎?
           confirm_action: confirm_create_from_photo
           # No content_path → the confirm gets the whole from-photo response object
           # (the draft) as `content`. (content_path: response was wrong — pathLookup
           # walked INTO response.response → undefined → draft was lost.)
+          # Tap-to-edit fields (mostly buttons, only price needs typing) so a
+          # realtor can correct the AI draft on Pin before publishing.
+          editable_fields:
+            - path: suggested.estimated_bedrooms
+              label: 🛏 改房數
+              options:
+                - { value: "0", label: "開放式 (0房)" }
+                - { value: "1", label: "1 房" }
+                - { value: "2", label: "2 房" }
+                - { value: "3", label: "3 房" }
+                - { value: "4", label: "4 房+" }
+            - path: suggested.estimated_bathrooms
+              label: 🚽 改廁數
+              options:
+                - { value: "1", label: "1 廁" }
+                - { value: "2", label: "2 廁" }
+                - { value: "3", label: "3 廁" }
+            - path: suggested.estimated_type
+              label: 💰 租 / 售
+              options:
+                - { value: "rent", label: "出租" }
+                - { value: "sale", label: "出售" }
+            - path: suggested.property_category
+              label: 🏠 改物業類型
+              options:
+                - { value: "私樓", label: "私樓" }
+                - { value: "開放式單位", label: "開放式單位" }
+                - { value: "唐樓", label: "唐樓" }
+                - { value: "居屋", label: "居屋" }
+                - { value: "村屋", label: "村屋" }
+                - { value: "服務式住宅", label: "服務式住宅" }
+                - { value: "商舖", label: "商舖" }
+            - path: suggested.estimated_district
+              label: 📍 改區域
+              options:
+                - { value: "中環", label: "中環" }
+                - { value: "灣仔", label: "灣仔" }
+                - { value: "銅鑼灣", label: "銅鑼灣" }
+                - { value: "北角", label: "北角" }
+                - { value: "太古", label: "太古" }
+                - { value: "鰂魚涌", label: "鰂魚涌" }
+                - { value: "尖沙咀", label: "尖沙咀" }
+                - { value: "旺角", label: "旺角" }
+                - { value: "九龍塘", label: "九龍塘" }
+                - { value: "觀塘", label: "觀塘" }
+                - { value: "將軍澳", label: "將軍澳" }
+                - { value: "沙田", label: "沙田" }
+                - { value: "荃灣", label: "荃灣" }
+                - { value: "元朗", label: "元朗" }
+            - path: suggested.estimated_sqft
+              label: 📐 改呎數
+              options:
+                - { value: "300", label: "~300 呎" }
+                - { value: "400", label: "~400 呎" }
+                - { value: "500", label: "~500 呎" }
+                - { value: "600", label: "~600 呎" }
+                - { value: "800", label: "~800 呎" }
+                - { value: "1000", label: "~1000 呎" }
+            - path: suggested.price_hkd
+              label: 💵 改價錢
+              input: number
+              placeholder: "售價打 15800000、月租打 25000"
 
       - id: confirm_create_from_photo
         label: 從 photo draft 建物件

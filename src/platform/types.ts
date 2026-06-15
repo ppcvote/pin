@@ -81,6 +81,21 @@ export interface RespondSpec {
   summarize_with?: string              // LLM prompt for unpredictable shapes
 }
 
+/** A preview field the user can correct via tap (or free text) before confirming.
+ *  Lets a photo-extracted draft be fixed without re-typing the whole thing. */
+export interface EditableField {
+  /** Dot-path under the preview content to set, e.g. "suggested.estimated_bedrooms". */
+  path: string
+  /** Button label in the edit menu, e.g. "🛏 改房數". */
+  label: string
+  /** Static options rendered as one-tap value buttons. Omit for free input. */
+  options?: ArgOption[]
+  /** When no options: collect via free text (numbers coerced on the backend). */
+  input?: 'text' | 'number'
+  /** Hint shown when collecting free text. */
+  placeholder?: string
+}
+
 export type ActionVisibility = 'primary' | 'secondary' | 'callback_only' | 'hidden'
 
 export interface ActionDef {
@@ -101,6 +116,9 @@ export interface ActionDef {
     /** Path on the API response to the value forwarded as `content` arg to confirm_action.
      *  e.g. "data.contents.0.text". If omitted, forwards the whole raw response (legacy). */
     content_path?: string
+    /** Fields the user can correct (tap or text) before confirming. When present,
+     *  the preview shows a「✏️ 修改」button that opens a tap-driven edit menu. */
+    editable_fields?: EditableField[]
   }
   gated_by?: string[]
 }
