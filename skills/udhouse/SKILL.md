@@ -76,12 +76,14 @@ metadata:
             ✨ AI 從照片產出的物件草稿:
 
             📝 標題: {{response.suggested.suggested_title}}
-            🏠 類型: {{response.suggested.estimated_type}}
+            🏠 物業類型: {{response.suggested.property_category}}
             📍 區域: {{response.suggested.estimated_district}}
             🛏 {{response.suggested.estimated_bedrooms}} 房 {{response.suggested.estimated_bathrooms}} 衛
             📐 {{response.suggested.estimated_sqft}} sqft
             🪟 陽台: {{response.suggested.has_balcony}}
             🎯 信心度: {{response.suggested.confidence}}
+
+            ℹ️ 出租/出售、區域、價錢 AI 看照片判斷不到，建立後你再補上。
 
             想建立這個物件嗎?
           confirm_action: confirm_create_from_photo
