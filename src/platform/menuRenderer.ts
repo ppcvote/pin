@@ -1,4 +1,4 @@
-import { allSkills, findSkill } from './registry.js'
+import { allSkills, findSkill, skillVisibleTo } from './registry.js'
 import type { Skill } from './types.js'
 
 export interface InlineButton {
@@ -12,14 +12,18 @@ export interface InlineButton {
 export function rootMenu(
   boundSkillIds: string[] = [],
   adminGrantedSkillIds: string[] = [],
+  viewerKey?: string,
 ): { title: string; buttons: InlineButton[][] } {
   const skills = allSkills()
   const bound = new Set(boundSkillIds)
   const adminGranted = new Set(adminGrantedSkillIds)
   // Admin-gated skills are always filtered, regardless of binding state.
   // hide_from_root skills never list at root (reached via a hub, e.g. admin-hub).
+  // Owner-private skills (apply flow) only show to their owner / platform owner.
   const visibleSkills = skills.filter(s =>
-    !s.pin?.hide_from_root && (!s.pin?.requires_admin || adminGranted.has(s.id)))
+    !s.pin?.hide_from_root
+    && (!s.pin?.requires_admin || adminGranted.has(s.id))
+    && skillVisibleTo(s, viewerKey))
 
   const buttons: InlineButton[][] = []
   buttons.push([{ text: '🃏 看我的 Agent', callback_data: 'card' }])

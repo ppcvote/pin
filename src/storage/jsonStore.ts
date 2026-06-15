@@ -49,6 +49,13 @@ export interface UserRecord {
   expenses: Expense[]
   /** In-progress multi-step action */
   wizard?: WizardState
+  /** In-progress self-serve apply conversation (PIN_APPLY_SPEC). */
+  apply?: {
+    step: 'await_url' | 'review'
+    url?: string
+    origin?: string
+    proposal?: { name: string; display_name: string; icon: string; buttons: { label: string; url: string }[] }
+  }
   /** Dead-letter queue — pushes that exhausted retries (capped at last 100) */
   failed_pushes?: FailedPush[]
   /** Outstanding binding tokens (one per pending product link). Expires in 10 min. */

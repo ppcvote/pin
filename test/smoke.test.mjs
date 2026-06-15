@@ -853,23 +853,28 @@ test('whatsapp webhook: POST wrong signature → 401', async () => {
 
 const { rootMenu } = await import('../dist/platform/menuRenderer.js')
 
-test('admin gate: rootMenu includes udhouse-admin when user is admin', () => {
-  // Pass udhouse-admin as an admin-granted skill
-  const { buttons } = rootMenu([], ['udhouse-admin'])
+test('admin gate: rootMenu includes admin-hub when user is admin', () => {
+  // admin-hub is the requires_admin entry point shown at root (udhouse-admin is
+  // hide_from_root since 0421b16 — folded INTO the hub, never listed at root).
+  const { buttons } = rootMenu([], ['admin-hub'])
   const callbackDatas = buttons.flat().map(b => b.callback_data)
   assert.ok(
-    callbackDatas.some(d => d === 's:udhouse-admin'),
-    'admin user must see udhouse-admin entry in root menu'
+    callbackDatas.some(d => d === 's:admin-hub'),
+    'admin user must see the admin-hub entry in root menu'
+  )
+  assert.ok(
+    !callbackDatas.some(d => d === 's:udhouse-admin'),
+    'hide_from_root skill (udhouse-admin) must never list at root'
   )
 })
 
-test('admin gate: rootMenu excludes udhouse-admin when user is not admin', () => {
+test('admin gate: rootMenu excludes admin-hub when user is not admin', () => {
   // Empty adminGrantedSkillIds → no admin grants
   const { buttons } = rootMenu([], [])
   const callbackDatas = buttons.flat().map(b => b.callback_data)
   assert.ok(
-    !callbackDatas.some(d => d === 's:udhouse-admin'),
-    'non-admin user must NOT see udhouse-admin entry in root menu'
+    !callbackDatas.some(d => d === 's:admin-hub'),
+    'non-admin user must NOT see admin-hub entry in root menu'
   )
 })
 
@@ -1046,4 +1051,76 @@ test('photo album ④: debounce invariant — argIdx stays 0 during accumulation
     const refs = (final?.wizard?.collected?.photos ?? '').split(',').filter(Boolean)
     assert.equal(refs.length, 3, 'all 3 accumulated images committed together')
   })
+})
+
+// ── Self-serve apply (PIN_APPLY_SPEC) ──
+
+test('apply/safeFetch: SSRF egress guard blocks private + metadata addresses', async () => {
+  const { isBlockedAddress, fetchPageSignals, UnsafeUrlError } = await import('../dist/platform/safeFetch.js')
+  for (const a of ['127.0.0.1', '10.1.2.3', '192.168.0.1', '172.16.5.4', '169.254.169.254', '0.0.0.0', '100.64.0.1', '::1', 'fd00::1', 'fe80::1']) {
+    assert.equal(isBlockedAddress(a), true, `${a} must be blocked`)
+  }
+  for (const a of ['8.8.8.8', '1.1.1.1', '93.184.216.34', '2606:4700:4700::1111']) {
+    assert.equal(isBlockedAddress(a), false, `${a} must be allowed`)
+  }
+  // No network needed: http:// rejected on protocol; IP literals rejected pre-fetch.
+  await assert.rejects(() => fetchPageSignals('http://example.com'), UnsafeUrlError, 'http:// rejected')
+  await assert.rejects(() => fetchPageSignals('https://127.0.0.1/'), UnsafeUrlError, 'loopback rejected')
+  await assert.rejects(() => fetchPageSignals('https://169.254.169.254/latest/meta-data'), UnsafeUrlError, 'metadata rejected')
+})
+
+test('apply/gen: newSkillId is spec-valid; SKILL.md round-trips through loadSkill with owner', async () => {
+  const { newSkillId, renderSkillMd, writeUserSkill } = await import('../dist/platform/userSkillGen.js')
+  const { loadSkill, USER_SKILLS_DIR } = await import('../dist/platform/skillLoader.js')
+  const { rmSync } = await import('node:fs')
+
+  const id = newSkillId('My Cool App!! 中文')
+  assert.match(id, /^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/, 'skill id must satisfy spec naming')
+  assert.ok(!id.includes('--'), 'no consecutive hyphens')
+
+  const app = {
+    id: 'app_test', owner: 'tg:APPLICANT_1', ownerName: 'Friend', status: 'pending',
+    url: 'https://demo.vercel.app/', origin: 'https://demo.vercel.app',
+    proposal: {
+      name: 'placeholder', display_name: 'Demo App', icon: '🚀',
+      buttons: [
+        { label: '🏠 Demo App', url: 'https://demo.vercel.app/' },
+        { label: '💰 定價', url: 'https://demo.vercel.app/pricing' },
+      ],
+    },
+    skillId: id, createdAt: new Date().toISOString(),
+  }
+  // Render is valid YAML frontmatter
+  const md = renderSkillMd(app)
+  assert.ok(md.startsWith('---\n') && md.includes('owner:'), 'frontmatter has owner')
+
+  await writeUserSkill(app)
+  try {
+    const skill = loadSkill(id, USER_SKILLS_DIR) // runs validation + ATR scan
+    assert.equal(skill.pin.owner, 'tg:APPLICANT_1', 'owner parsed onto skill')
+    assert.equal(skill.pin.actions.length, 1)
+    assert.equal(skill.pin.actions[0].respond.follow_up_urls.length, 2, 'both buttons rendered')
+  } finally {
+    rmSync(`${USER_SKILLS_DIR}/${id}`, { recursive: true, force: true })
+  }
+})
+
+test('apply/visibility: owner-private skill hidden from strangers, shown to owner + platform owner', async () => {
+  const { skillVisibleTo, isPlatformOwner } = await import('../dist/platform/registry.js')
+  const priv = { id: 'x', name: 'x', description: '', body: '', pin: { owner: 'tg:OWNER_A', actions: [] } }
+  const pub = { id: 'y', name: 'y', description: '', body: '', pin: { actions: [] } }
+
+  assert.equal(skillVisibleTo(priv, 'tg:OWNER_A'), true, 'owner sees own')
+  assert.equal(skillVisibleTo(priv, 'tg:STRANGER'), false, 'stranger does not see private')
+  assert.equal(skillVisibleTo(pub, 'tg:STRANGER'), true, 'public visible to all')
+
+  const prev = process.env.OWNER_CHAT_ID
+  process.env.OWNER_CHAT_ID = 'tg:PLATFORM_BOSS'
+  try {
+    assert.equal(isPlatformOwner('tg:PLATFORM_BOSS'), true)
+    assert.equal(skillVisibleTo(priv, 'tg:PLATFORM_BOSS'), true, 'platform owner sees all private')
+    assert.equal(skillVisibleTo(priv, 'tg:OTHER'), false)
+  } finally {
+    if (prev === undefined) delete process.env.OWNER_CHAT_ID; else process.env.OWNER_CHAT_ID = prev
+  }
 })

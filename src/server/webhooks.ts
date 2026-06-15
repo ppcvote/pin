@@ -132,6 +132,15 @@ export function startWebhookServer(channels: Channel[], port: number = PORT): ht
       return
     }
 
+    // Anchor endpoint for link-menu skills (apply flow). The executor requires a
+    // 2xx-JSON api call before rendering buttons; user skills point here so they
+    // need no backend of their own. Loopback-only; carries no data.
+    if (req.method === 'GET' && req.url === '/ping') {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true }))
+      return
+    }
+
     // Public scratch-blob endpoint — serves files written by tempStore.saveTempBlob.
     // Used by LINE image messaging (it can't accept raw bytes, needs an HTTPS URL).
     // Random filenames + 30-min TTL provide adequate URL-as-secret protection;

@@ -16,6 +16,7 @@ import { brainName } from './brain/index.js'
 import { startWebhookServer } from './server/webhooks.js'
 import { deliverWithRetry } from './runtime/deliver.js'
 import { reportWeeklyActive } from './runtime/flywheelReporter.js'
+import { setChannels } from './runtime/notifier.js'
 import type { Channel } from './channels/types.js'
 
 // Arm the ATR threat scanner first, then boot the skill registry
@@ -55,6 +56,10 @@ for (const ch of channels) {
     process.exit(1)
   }
 }
+
+// Wire channels into the notifier so the apply/approval flow can push to a
+// different user than the current turn (owner on submit, applicant on decision).
+setChannels(channels)
 
 // HTTP webhook receiver — products → Pin → user channel
 startWebhookServer(channels)

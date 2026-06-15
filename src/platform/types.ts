@@ -169,6 +169,10 @@ export interface PinExtension {
    *  appear as its own item in the root menu — used to fold a product's admin
    *  skill into the admin-hub instead of floating separately. */
   hide_from_root?: boolean
+  /** Self-serve apply (PIN_APPLY_SPEC): composite userKey "<channel>:<userId>"
+   *  of the applicant. When set, the skill is private — only visible to its
+   *  owner and to the platform owner (OWNER_CHAT_ID). Built-in skills omit it. */
+  owner?: string
 }
 
 export interface Skill {

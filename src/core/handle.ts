@@ -1,7 +1,8 @@
 import { ensureUser, loadUser } from '../storage/jsonStore.js'
 import { route as legacyRoute } from '../router.js'
 import { appendHistory } from '../brain/memory.js'
-import { findAction, findSkill, allSkills } from '../platform/registry.js'
+import { findAction, findSkill, allSkills, skillVisibleTo, isPlatformOwner } from '../platform/registry.js'
+import { startApply, appsConsole, inApply, applyText, applyCallback } from './applyFlow.js'
 import { rootMenu, skillMenu, parseCallback } from '../platform/menuRenderer.js'
 import { probeAdminAccess } from '../products/udhouse.js'
 import { executeAction } from '../platform/actionExecutor.js'
@@ -54,9 +55,9 @@ function adminGrantsFromCache(user: import('../storage/jsonStore.js').UserRecord
 }
 
 /** Render the platform's main onboarding screen. */
-function welcomeScreen(displayName: string, adminGrants: string[] = []): OutboundReply {
+function welcomeScreen(displayName: string, adminGrants: string[] = [], viewerKey?: string): OutboundReply {
   const adminGranted = new Set(adminGrants)
-  const skills = allSkills().filter(s => !s.pin?.requires_admin || adminGranted.has(s.id))
+  const skills = allSkills().filter(s => (!s.pin?.requires_admin || adminGranted.has(s.id)) && skillVisibleTo(s, viewerKey))
   const skillNames = skills.map(s => `${s.pin?.icon ?? '•'} ${s.name}`).join('  ')
   const text = [
     `👋 Hi ${displayName}, 我是 **Pin**`,
@@ -87,6 +88,7 @@ function helpScreen(): OutboundReply {
       '🔘 主操作:',
       '  /menu     開所有 skill 選單',
       '  /start    歡迎畫面',
+      '  /apply    把你的網頁變成 Pin 選單（送審後上線）',
       '  /card     看我的 Agent 卡 (含分享圖)',
       '  /stats    本週 dogfood 數字 + Agent 決策分布',
       '  /version  Pin runtime 版本資訊',
@@ -215,11 +217,18 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     // System callbacks
     if (data === 'sys:help') return { ...helpScreen(), edit: true }
 
+    // Self-serve apply (applicant apply:* + owner ap:*) — handled before the
+    // generic callback parser so its prefixes never collide with skill routing.
+    if (data.startsWith('apply:') || data.startsWith('ap:')) {
+      const r = await applyCallback(user, userKey, msg.userDisplayName, data)
+      if (r) return r
+    }
+
     const parsed = parseCallback(data)
 
     if (parsed.kind === 'root') {
       const boundIds = Object.keys(user.bindings ?? {})
-      const { title, buttons } = rootMenu(boundIds, adminGrants)
+      const { title, buttons } = rootMenu(boundIds, adminGrants, userKey)
       return { text: title, buttons, edit: true, theme: { title: 'Pin' } }
     }
     if (data === 'explore') {
@@ -227,6 +236,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       const boundIds = new Set(Object.keys(user.bindings ?? {}))
       const unbound = allSkills()
         .filter(s => !s.pin?.requires_admin || adminGranted.has(s.id))
+        .filter(s => skillVisibleTo(s, userKey))
         .filter(s => !boundIds.has(s.id))
       if (unbound.length === 0) {
         return { text: '所有 skill 都已連接 🎉', buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
@@ -613,19 +623,19 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
 
   // Slash commands
   if (text === '/start') {
-    return welcomeScreen(msg.userDisplayName, adminGrants)
+    return welcomeScreen(msg.userDisplayName, adminGrants, userKey)
   }
   // LINE follow event — same welcome + bind-recovery hint, because the
   // add-friend interstitial can swallow the product deep link's prefilled
   // "bind <token>" message.
   if (text === '/follow') {
-    const w = welcomeScreen(msg.userDisplayName, adminGrants)
+    const w = welcomeScreen(msg.userDisplayName, adminGrants, userKey)
     w.text += '\n\n🔗 從產品頁面點「用 LINE 管理」過來的嗎?\n加好友完成了, 請回到產品頁面**再點一次**那顆按鈕, 就會完成綁定。'
     return w
   }
   if (text === '/menu') {
     const boundIds = Object.keys(user.bindings ?? {})
-    const { title, buttons } = rootMenu(boundIds, adminGrants)
+    const { title, buttons } = rootMenu(boundIds, adminGrants, userKey)
     return { text: title, buttons }
   }
   if (text === '/card') {
@@ -682,11 +692,24 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       ]],
     }
   }
+  if (text === '/apply') {
+    return startApply(user)
+  }
+  if (text === '/apps') {
+    if (!isPlatformOwner(userKey)) return { text: '我看不懂這個指令 — 試 /menu 或自然語言' }
+    return appsConsole()
+  }
   if (text === '/help') {
     return helpScreen()
   }
   if (text.startsWith('/')) {
     return { text: '我看不懂這個指令 — 試 /menu 或自然語言' }
+  }
+
+  // Self-serve apply: if the user is mid-application, a pasted (non-slash) URL
+  // continues the flow. Slash commands above already escaped it.
+  if (inApply(user)) {
+    return applyText(user, text)
   }
 
   // Free-form text routing
@@ -789,7 +812,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     }
     // fallback — show menu
     const boundIds = Object.keys(user.bindings ?? {})
-    const root = rootMenu(boundIds)
+    const root = rootMenu(boundIds, [], userKey)
     await incrementAgentStat(userKey, 'fallback')
     return { text: `(我這邊路由曖昧, 給你選單 — ${decision.reason})`, buttons: root.buttons }
   }

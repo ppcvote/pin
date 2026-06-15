@@ -61,8 +61,8 @@ function validateSkill(skill: Skill, fm: ParsedFrontmatter, skillDir: string): s
   return errs
 }
 
-export function loadSkill(skillDir: string): Skill {
-  const skillPath = join(SKILLS_DIR, skillDir)
+export function loadSkill(skillDir: string, baseDir: string = SKILLS_DIR): Skill {
+  const skillPath = join(baseDir, skillDir)
   const skillFile = join(skillPath, 'SKILL.md')
   if (!existsSync(skillFile)) throw new Error(`SKILL.md not found at ${skillFile}`)
 
@@ -80,6 +80,7 @@ export function loadSkill(skillDir: string): Skill {
         bind_url: fm.metadata.pin.bind_url,
         requires_admin: fm.metadata.pin.requires_admin === true,
         hide_from_root: fm.metadata.pin.hide_from_root === true,
+        owner: typeof fm.metadata.pin.owner === 'string' ? fm.metadata.pin.owner : undefined,
         webhooks: (fm.metadata.pin.webhooks ?? []).map((w: any) => ({
           event: w.event,
           secret: w.secret,
@@ -165,17 +166,24 @@ export function loadSkill(skillDir: string): Skill {
   return skill
 }
 
-export function loadAllSkills(): Skill[] {
-  if (!existsSync(SKILLS_DIR)) return []
-  const entries = readdirSync(SKILLS_DIR)
+/** Runtime dir for self-serve, approved user skills (PIN_APPLY_SPEC). */
+export const USER_SKILLS_DIR = join(process.cwd(), 'data', 'user-skills')
+
+function loadSkillsFromDir(baseDir: string): Skill[] {
+  if (!existsSync(baseDir)) return []
   const out: Skill[] = []
-  for (const e of entries) {
-    if (!statSync(join(SKILLS_DIR, e)).isDirectory()) continue
+  for (const e of readdirSync(baseDir)) {
+    if (!statSync(join(baseDir, e)).isDirectory()) continue
     try {
-      out.push(loadSkill(e))
+      out.push(loadSkill(e, baseDir))
     } catch (err) {
       console.error(`[skillLoader] failed to load ${e}: ${(err as Error).message}`)
     }
   }
   return out
+}
+
+export function loadAllSkills(): Skill[] {
+  // Built-in skills first, then approved user-submitted skills (apply flow).
+  return [...loadSkillsFromDir(SKILLS_DIR), ...loadSkillsFromDir(USER_SKILLS_DIR)]
 }
