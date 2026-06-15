@@ -33,9 +33,12 @@ export class TelegramChannel implements Channel {
   async start(handler: MessageHandler): Promise<void> {
     this.handler = handler
 
-    // /start treated same as any text command — Pin core decides what to do
+    // /start treated same as any text command — Pin core decides what to do.
+    // Forward the deep-link payload (t.me/<bot>?start=<payload>) so flows like
+    // `?start=apply` and `?start=<bindtoken>` reach the core intact.
     this.bot.start(async (ctx) => {
-      await this.dispatch(ctx, { text: '/start' })
+      const payload = (ctx.startPayload ?? '').trim()
+      await this.dispatch(ctx, { text: payload ? `/start ${payload}` : '/start' })
     })
 
     this.bot.command('menu', async (ctx) => {

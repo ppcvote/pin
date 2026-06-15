@@ -622,6 +622,10 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
   }
 
   // Slash commands
+  // Deep-link entry: t.me/UltraPinaibot?start=apply → straight into the apply flow.
+  if (/^\/start\s+apply$/.test(text)) {
+    return startApply(user)
+  }
   if (text === '/start') {
     return welcomeScreen(msg.userDisplayName, adminGrants, userKey)
   }

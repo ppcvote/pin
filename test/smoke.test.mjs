@@ -1124,3 +1124,13 @@ test('apply/visibility: owner-private skill hidden from strangers, shown to owne
     if (prev === undefined) delete process.env.OWNER_CHAT_ID; else process.env.OWNER_CHAT_ID = prev
   }
 })
+
+test('apply/deeplink: /start apply enters the apply flow', async () => {
+  const { handlePinMessage } = await import('../dist/core/handle.js')
+  const { loadUser } = await import('../dist/storage/jsonStore.js')
+  const uid = 'TEST_APPLY_DEEPLINK_' + Date.now()
+  const r = await handlePinMessage({ channelId: 'tg', userId: uid, userDisplayName: 'Friend', text: '/start apply' })
+  assert.ok(r?.text.includes('貼上你的網址'), 'deep link should open the apply prompt')
+  const u = await loadUser('tg:' + uid)
+  assert.equal(u?.apply?.step, 'await_url', 'apply conversation should be armed')
+})
