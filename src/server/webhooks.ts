@@ -12,6 +12,7 @@ import { findSkill } from '../platform/registry.js'
 import { readByName } from '../runtime/tempStore.js'
 import { adminStats, adminListUsers, adminGetUser, adminDeleteUser } from './adminApi.js'
 import { pushToUser } from '../runtime/notifier.js'
+import type { WeChatChannel } from '../channels/wechat.js'
 import type { Channel, Button } from '../channels/types.js'
 import type { LineChannel } from '../channels/line.js'
 import type { WhatsAppChannel } from '../channels/whatsapp.js'
@@ -141,6 +142,29 @@ export function startWebhookServer(channels: Channel[], port: number = PORT): ht
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: true }))
       return
+    }
+
+    // ── WeChat 服務號 webhook（海外帳號，打 UD 香港市場）：GET 握手 + POST 收訊 ──
+    const wxPath = (req.url ?? '').split('?')[0]
+    if (wxPath === '/wechat') {
+      const wx = channels.find(c => c.id === 'wechat') as WeChatChannel | undefined
+      if (!wx) { res.writeHead(404, { 'Content-Type': 'text/plain' }); res.end('wechat not configured'); return }
+      const sp = new URL(req.url ?? '', 'http://x').searchParams
+      const signature = sp.get('signature') ?? '', timestamp = sp.get('timestamp') ?? '', nonce = sp.get('nonce') ?? ''
+      if (req.method === 'GET') {
+        const echo = wx.verify(signature, timestamp, nonce, sp.get('echostr') ?? '')
+        if (echo == null) { res.writeHead(403, { 'Content-Type': 'text/plain' }); res.end('bad signature'); return }
+        res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end(echo); return
+      }
+      if (req.method === 'POST') {
+        let xml = ''
+        for await (const chunk of req) xml += chunk
+        const reply = await wx.handleWebhook(xml, { signature, timestamp, nonce })
+        // WeChat 把回傳 'success'（或空）當作「已收、不回覆」；有 XML 就是被動回覆。
+        res.writeHead(200, { 'Content-Type': reply ? 'application/xml' : 'text/plain' })
+        res.end(reply || 'success'); return
+      }
+      res.writeHead(405, { 'Content-Type': 'text/plain' }); res.end('method not allowed'); return
     }
 
     // ── Lead 通知中繼：UltraLab 名片頁諮詢 → 推給卡主本人，LINE/TG/WhatsApp 一致 ──

@@ -11,6 +11,7 @@ import { findDueReminders, markReminderFired } from './skills/reminders.js'
 import { TelegramChannel } from './channels/telegram.js'
 import { LineChannel } from './channels/line.js'
 import { WhatsAppChannel } from './channels/whatsapp.js'
+import { WeChatChannel } from './channels/wechat.js'
 import { handlePinMessage } from './core/handle.js'
 import { brainName } from './brain/index.js'
 import { startWebhookServer } from './server/webhooks.js'
@@ -42,6 +43,14 @@ if (process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN) {
   channels.push(new WhatsAppChannel(
     process.env.WHATSAPP_PHONE_NUMBER_ID,
     process.env.WHATSAPP_ACCESS_TOKEN,
+  ))
+}
+// WeChat 服務號（海外，打 UD 香港市場）—— 三把鑰匙齊才掛上；缺則不啟用（原型階段）
+if (process.env.WECHAT_APP_ID && process.env.WECHAT_APP_SECRET && process.env.WECHAT_TOKEN) {
+  channels.push(new WeChatChannel(
+    process.env.WECHAT_APP_ID,
+    process.env.WECHAT_APP_SECRET,
+    process.env.WECHAT_TOKEN,
   ))
 }
 

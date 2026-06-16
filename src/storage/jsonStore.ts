@@ -78,6 +78,8 @@ export interface UserRecord {
   bind_attempts?: { hourBucket: string; count: number }
   /** ISO timestamp of the last inbound WhatsApp message from this user. Drives the 24-hour window check. */
   wa_last_inbound?: string
+  /** ISO timestamp of the last inbound WeChat message from this user. Drives the 48-hour 客服 window check. */
+  wx_last_inbound?: string
   /** Cached result of admin identity probes, keyed by skill ID. Once set, skips re-probe. */
   admin_probe_cache?: Record<string, { isAdmin: boolean; checkedAt: string }>
   /**
