@@ -28,20 +28,17 @@ export function rootMenu(
   const buttons: InlineButton[][] = []
   buttons.push([{ text: '🃏 看我的 Agent', callback_data: 'card' }])
 
-  // Bound (or, if nothing is bound yet, show all so dogfood users aren't stranded)
-  const showAll = bound.size === 0
-  const myskills = showAll ? visibleSkills : visibleSkills.filter(s => bound.has(s.id))
+  // 只顯示「你綁的」skill —— 不再對未綁定者全顯示（授權修補 6/16：避免陌生人看到/點到產品 skill）。
+  const myskills = visibleSkills.filter(s => bound.has(s.id))
   for (const s of myskills) {
     const icon = s.pin?.icon ?? '•'
     buttons.push([{ text: `${icon} ${s.pin?.display_name ?? s.name}`, callback_data: `s:${s.id}` }])
   }
 
-  // 🧭 探索 — show only when there are un-bound visible skills to surface
-  if (!showAll) {
-    const explore = visibleSkills.filter(s => !bound.has(s.id))
-    if (explore.length > 0) {
-      buttons.push([{ text: '🧭 探索 (還沒連接)', callback_data: 'explore' }])
-    }
+  // 🧭 探索 — 列出還沒連接的 skill（去連接，不是直接操作）。
+  const explore = visibleSkills.filter(s => !bound.has(s.id))
+  if (explore.length > 0) {
+    buttons.push([{ text: '🧭 探索 (還沒連接)', callback_data: 'explore' }])
   }
 
   return { title: '選一個吧 👇', buttons }

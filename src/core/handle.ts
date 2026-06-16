@@ -24,6 +24,10 @@ const NAV_ROW = (skillId?: string): Button[] => skillId
   ? [{ text: `⬅️ 返回`, callback_data: `s:${skillId}` }, { text: '🏠 主選單', callback_data: 'm:root' }]
   : [{ text: '🏠 主選單', callback_data: 'm:root' }]
 
+// 授權白名單（6/16）：通用工具、不碰任何租戶/平台資料，沒綁定也能用。
+// 其餘 skill（advisor/mindthread/udhouse/domain/ultragrowth…）動作一律要綁定或 owner。
+const PUBLIC_SKILLS = new Set(['qa', 'slides'])
+
 /**
  * Probe admin access for any requires_admin skills that haven't been checked yet.
  * Result is persisted to user.admin_probe_cache so subsequent messages are instant.
@@ -35,9 +39,11 @@ async function ensureAdminProbeCache(user: import('../storage/jsonStore.js').Use
   let dirty = false
   for (const skill of adminSkills) {
     if (user.admin_probe_cache?.[skill.id] !== undefined) continue
+    // 授權修補（6/16）：admin 必須是「平台 owner 本人」。
+    // 舊版只問 probeAdminAccess()=平台共用金鑰有沒有 admin（永遠有）→ 每個人都被判 admin。
     let isAdmin = false
     try {
-      isAdmin = await probeAdminAccess()
+      isAdmin = isPlatformOwner(userKey) && (await probeAdminAccess())
     } catch {
       isAdmin = false
     }
@@ -49,8 +55,10 @@ async function ensureAdminProbeCache(user: import('../storage/jsonStore.js').Use
   if (dirty) await saveUser(user)
 }
 
-/** Derive admin-granted skill IDs from the cached probe results on the user record. */
-function adminGrantsFromCache(user: import('../storage/jsonStore.js').UserRecord): string[] {
+/** Derive admin-granted skill IDs. HARD GATE: only the platform owner gets admin,
+ *  regardless of any (possibly poisoned) cached probe result. */
+function adminGrantsFromCache(user: import('../storage/jsonStore.js').UserRecord, userKey: string): string[] {
+  if (!isPlatformOwner(userKey)) return []
   return Object.entries(user.admin_probe_cache ?? {})
     .filter(([, v]) => v.isAdmin)
     .map(([k]) => k)
@@ -177,7 +185,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
   // Admin gate: probe requires_admin skills once per user; cache result in user record.
   // Fast no-op after first probe. Fail-safe: any error → non-admin.
   await ensureAdminProbeCache(user, userKey)
-  const adminGrants = adminGrantsFromCache(user)
+  const adminGrants = adminGrantsFromCache(user, userKey)
 
   // Resolve callback indirection (`cb:<hash>` → full callback) before ANY
   // routing — including the wizard branch below, which must see the real
@@ -494,6 +502,20 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       const found = findAction(parsed.skillId, parsed.actionId)
       if (!found) return { text: 'Action not found' }
       const { skill, action } = found
+
+      // 授權修補（6/16）：產品 skill 的動作用「共用金鑰」打後端，沒綁定就執行＝會踩到平台/別人資料。
+      // 除了通用工具(PUBLIC_SKILLS)，一律要先綁定（或本人 owner）才准跑動作。
+      if (!PUBLIC_SKILLS.has(skill.id) && !user.bindings?.[parsed.skillId] && !isPlatformOwner(userKey)) {
+        const icon = skill.pin?.icon ?? '🔒'
+        return {
+          text: `${icon} 要先連接「${skill.pin?.display_name ?? skill.name}」才能用這個功能。\n從你自己的產品後台綁定，這個動作就只會動到你的資料。`,
+          buttons: [
+            ...((skill.pin?.webhooks?.length ?? 0) > 0 ? [[{ text: '🔔 連接通知', callback_data: `bind:${skill.id}` }]] : []),
+            [{ text: '🏠 主選單', callback_data: 'm:root' }],
+          ],
+          theme: { primaryColor: skill.pin?.primary_color, icon: skill.pin?.icon, title: skill.name },
+        }
+      }
 
       // Args still needed? Pre-filled args (from a choices/follow-up button)
       // count as satisfied. Anything else triggers the wizard.
