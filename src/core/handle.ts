@@ -282,9 +282,12 @@ async function ownerConsole(edit = false): Promise<OutboundReply> {
       `📣 有分享戰績 ${linkedSharers}`,
       `📋 待審 apply ${pending}`,
       '',
-      '刪某會員：/deluser <Pin碼>　·　全會員管理：ultralab.tw/admin → Pin 會員',
+      '刪某會員：打 /deluser 加上對方的 Pin 碼。',
     ].join('\n'),
-    buttons: [[{ text: '📋 待審清單', callback_data: 'ap:list:' }], [{ text: '🏠 主選單', callback_data: 'm:root' }]],
+    buttons: [
+      [{ text: '🌐 全會員後台（瀏覽／搜尋／刪除）', url: 'https://ultralab.tw/admin' }],
+      [{ text: '📋 待審清單', callback_data: 'ap:list:' }, { text: '🏠 主選單', callback_data: 'm:root' }],
+    ],
     edit,
   }
 }
