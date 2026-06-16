@@ -151,6 +151,23 @@ function chunkButtons(arr: Button[], perRow: number): Button[][] {
   return rows
 }
 
+// 統一的「我的名片」中樞（PPC 6/16：agent 分享頁＝名片，一個就好）。
+// 看／分享走 /card/{slug}（那頁顯示卡＋轉傳），編輯走 /edit。是 owner 在 Pin 裡的唯一一張卡。
+function myCardReply(us: { slug: string; editToken: string; name?: string }, edit = false): OutboundReply {
+  const cardUrl = `https://ultralab.tw/card/${us.slug}`
+  const editUrl = `https://ultralab.tw/edit/${us.slug}?t=${us.editToken}`
+  return {
+    text: `🪪 ${us.name ? us.name + ' 的名片卡' : '你的名片卡'}\n\n別人來找你，我第一時間轉給你。看一下、改一下、或轉傳給朋友 👇`,
+    buttons: [
+      [{ text: '🔗 看 / 分享名片卡', url: cardUrl }],
+      [{ text: '✏️ 編輯名片', url: editUrl }],
+      [{ text: '🏠 主選單', callback_data: 'm:root' }],
+    ],
+    theme: { title: 'Pin', icon: '🪪' },
+    edit,
+  }
+}
+
 export async function handlePinMessage(msg: InboundMessage): Promise<OutboundReply | null> {
   // Composite user key for cross-channel isolation. TG digits, LINE alphanumeric, etc.
   // Stored as the jsonStore filename directly — channel prefix prevents collisions.
@@ -349,13 +366,18 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       }
     }
 
-    // System-injected: agent card
+    // System-injected: agent card ＝ 名片（PPC：一個就好）。有名片＝顯示名片中樞；沒有＝agent 卡 + 做一張。
     if (data === 'card') {
+      if (user.ultrasite?.slug && user.ultrasite.editToken) {
+        return myCardReply(user.ultrasite, true)
+      }
       const cardData = await buildAgentCardData(userKey)
       const text = renderAgentCardText(cardData)
       return {
-        text,
+        text: text + '\n\n還沒有自己的名片？做一張，就能在這看、改、分享。',
         buttons: [[
+          { text: '＋ 做一張我的名片', url: 'https://ultralab.tw/me' },
+        ], [
           { text: '🖼️ 產生分享圖', callback_data: 'card_share' },
         ], [
           { text: '⬅️ 主選單', callback_data: 'm:root' },
@@ -771,6 +793,15 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
   // continues the flow. Slash commands above already escaped it.
   if (inApply(user)) {
     return applyText(user, text)
+  }
+
+  // ULTRASITE「我的名片 / 看名片」—— 顯示名片中樞（看/分享 + 編輯，agent 卡＝名片，一個就好）。
+  if (/^(我的|看|查看|顯示|秀).{0,2}(名片|卡片|agent|代理)$|^(名片|我的卡|我的agent)$/i.test(text.trim())) {
+    if (user.ultrasite?.slug && user.ultrasite.editToken) return myCardReply(user.ultrasite)
+    return {
+      text: '你還沒有名片卡。做一張，就能在這看、改、分享 👇',
+      buttons: [[{ text: '＋ 做一張我的名片', url: 'https://ultralab.tw/me' }]],
+    }
   }
 
   // ULTRASITE「改名片」—— 一鍵開視覺編輯器（放照片/改字/換色，所見即所得）。
