@@ -1,4 +1,4 @@
-import { allSkills, findSkill, skillVisibleTo } from './registry.js'
+import { allSkills, findSkill, skillVisibleTo, isPlatformOwner } from './registry.js'
 import type { Skill } from './types.js'
 
 export interface InlineButton {
@@ -28,9 +28,10 @@ export function rootMenu(
   const buttons: InlineButton[][] = []
   buttons.push([{ text: '🃏 看我的 Agent', callback_data: 'card' }])
 
-  // 顯示「你綁的」skill ＋ admin-granted 的管理 hub（owner 才有 admin grant）。
-  // 不再對未綁定者全顯示（授權修補 6/16：避免陌生人看到/點到產品 skill）。
-  const atRoot = (s: Skill) => bound.has(s.id) || (!!s.pin?.requires_admin && adminGranted.has(s.id))
+  // owner 本人＝全顯示（dogfood 所有產品）；其他人＝只顯示「你綁的」＋ admin-granted hub。
+  // 授權修補 6/16：避免陌生人看到/點到產品 skill，但別把 owner 自己也鎖住。
+  const isOwner = isPlatformOwner(viewerKey)
+  const atRoot = (s: Skill) => isOwner || bound.has(s.id) || (!!s.pin?.requires_admin && adminGranted.has(s.id))
   const myskills = visibleSkills.filter(atRoot)
   for (const s of myskills) {
     const icon = s.pin?.icon ?? '•'
