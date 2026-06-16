@@ -6,7 +6,7 @@ import { findAction, findSkill, allSkills, skillVisibleTo, isPlatformOwner } fro
 import { startApply, appsConsole, inApply, applyText, applyCallback } from './applyFlow.js'
 import { rootMenu, skillMenu, parseCallback } from '../platform/menuRenderer.js'
 import { createSkillShare, recordRedeem } from '../platform/skillShareStore.js'
-import { resolveAccount, linkChannel, unlinkChannel, createLinkToken, resolveLinkToken, ensurePinCode, deleteAccountData, accountForPinCode } from '../platform/accountStore.js'
+import { resolveAccount, linkChannel, unlinkChannel, createLinkToken, resolveLinkToken, consumeLinkToken, ensurePinCode, deleteAccountData, accountForPinCode } from '../platform/accountStore.js'
 import { pushToUser } from '../runtime/notifier.js'
 import { probeAdminAccess } from '../products/udhouse.js'
 import { executeAction } from '../platform/actionExecutor.js'
@@ -496,6 +496,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       const dest = await loadUser(target)
       if (own && dest) { mergeInto(dest, own); await saveUser(dest) }
       await linkChannel(rawKey, target)
+      await consumeLinkToken(token) // 單次性：防重放接管
       if (own) { try { await deleteUser(rawKey) } catch { /* 併入後刪來源、避免重複帳號 */ } }
       await notifyLinked(target, rawKey, msg.channelId)
       return { text: '🔗 併好了！兩邊合成同一個 Pin，全通。', buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]], edit: true }
@@ -521,6 +522,9 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
         return { text: 'Action 已不存在' }
       }
       const { skill, action } = found
+      // P1 TOCTOU：確認與執行間若已解綁，這裡再擋一次（pending.args 可能帶舊租戶）。
+      const _blockedConfirm = actionBlockedReply(skill, userKey, user)
+      if (_blockedConfirm) { user.agent_pending = undefined; await saveUser(user); return _blockedConfirm }
       user.agent_pending = undefined
       await saveUser(user)
       const result = await executeAction(skill, action, pending.args)
@@ -778,6 +782,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
           type: 'ultrasite-claim', token,
           channelType: msg.channelId === 'tg' ? 'telegram' : msg.channelId,
           channelId: msg.userId,
+          claimSecret: process.env.PIN_CLAIM_SECRET, // P0：只有 Pin server 能 claim
         }),
       })
       const d: any = await r.json().catch(() => ({}))
@@ -843,6 +848,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     const own = await loadUser(rawKey)
     if (!own || isThinAccount(own)) {
       await linkChannel(rawKey, target)
+      await consumeLinkToken(token) // 單次性：防重放接管
       if (own) { try { await deleteUser(rawKey) } catch { /* 清掉空來源、避免重複帳號 */ } }
       await notifyLinked(target, rawKey, msg.channelId)
       return { text: '🔗 連結好了！你在這個平台就是同一個 Pin 了 —— 名片、綁定、設定、戰績全通。', buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
@@ -1005,7 +1011,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
   // 資料刪除（PDPO／PIPL 合規）—— 會員自己刪。確認制。
   if (text === '/deleteme' || /^(刪除|刪掉|清除|移除|刪).{0,3}(我的)?(資料|帳號|帳戶|個資|個人資料)$/.test(text.trim())) {
     return {
-      text: `⚠️ 刪除你在 Pin 的資料\n\n會永久刪除：綁定、採用的工具、設定、紀錄、跨平台連結。**無法復原。**\n（名片頁如有，請另外處理。）\n\n確定刪？`,
+      text: `⚠️ 刪除你在 Pin 的資料\n\n會永久刪除：綁定、採用的工具、設定、紀錄、跨平台連結，**連你的名片頁一起刪**。**無法復原。**\n\n確定刪？`,
       buttons: [[{ text: '🗑 確定刪除我的所有資料', callback_data: 'selfdelete:confirm' }], [{ text: '取消', callback_data: 'm:root' }]],
     }
   }

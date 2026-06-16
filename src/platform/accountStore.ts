@@ -70,8 +70,17 @@ export async function deleteAccountData(account: string, pinCode?: string): Prom
   if (pinCode) { try { await unlink(join(CODES, `${safe(pinCode)}.json`)) } catch { /* ignore */ } }
 }
 
-/** 產生一次性連結 token（給「另一台」點了自動掛上 account）。 */
+/** 產生一次性連結 token（給「另一台」點了自動掛上 account）。順手清過期 token、防目錄無限長。 */
 export async function createLinkToken(account: string): Promise<string> {
+  // best-effort 清過期（>TTL）link token
+  try {
+    const { readdir, unlink } = await import('node:fs/promises')
+    for (const f of await readdir(TOKENS).catch(() => [])) {
+      if (!f.endsWith('.json')) continue
+      const t = await readJson<{ createdAt: number }>(join(TOKENS, f))
+      if (t && Date.now() - t.createdAt > LINK_TTL_MS) await unlink(join(TOKENS, f)).catch(() => {})
+    }
+  } catch { /* ignore */ }
   const token = 'link_' + randomBytes(8).toString('hex')
   await writeJson(join(TOKENS, `${safe(token)}.json`), { account, createdAt: Date.now() })
   return token
@@ -83,6 +92,11 @@ export async function resolveLinkToken(token: string): Promise<string | null> {
   if (!t) return null
   if (Date.now() - t.createdAt > LINK_TTL_MS) return null
   return t.account
+}
+
+/** 消耗連結 token（單次性，防重放接管）。連結/併入成功後呼叫。 */
+export async function consumeLinkToken(token: string): Promise<void> {
+  try { const { unlink } = await import('node:fs/promises'); await unlink(join(TOKENS, `${safe(token)}.json`)) } catch { /* 已不在 */ }
 }
 
 /** 取得（必要時生成）帳號的 Pin 碼。穩定、可顯示/印名片。 */

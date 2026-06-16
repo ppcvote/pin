@@ -147,7 +147,10 @@ export function startWebhookServer(channels: Channel[], port: number = PORT): ht
     if (adminPath.startsWith('/admin/')) {
       const key = req.headers['x-admin-key']
       const expected = process.env.PIN_ADMIN_KEY
-      if (!expected || typeof key !== 'string' || key !== expected) {
+      // timing-safe 比對（避免長度/前綴 timing oracle）。長度先比、再 timingSafeEqual。
+      const keyOk = !!expected && typeof key === 'string' && key.length === expected.length
+        && crypto.timingSafeEqual(Buffer.from(key), Buffer.from(expected))
+      if (!keyOk) {
         console.warn(`[admin] auth fail ${req.method} ${adminPath}`)
         res.writeHead(401, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'unauthorized' }))
