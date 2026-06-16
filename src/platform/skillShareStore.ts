@@ -33,7 +33,19 @@ async function save(s: SkillShare): Promise<void> {
   await rename(tmp, file)
 }
 
+const SHARE_TTL_MS = 90 * 24 * 60 * 60 * 1000 // 90 天
 export async function createSkillShare(skillId: string, createdBy: string, createdByName?: string): Promise<SkillShare> {
+  // best-effort 清 90 天前的舊分享（防目錄無限長 + PDPO 採用者 PII 不久留）
+  try {
+    const { readdir, unlink } = await import('node:fs/promises')
+    for (const f of await readdir(ROOT).catch(() => [])) {
+      if (!f.endsWith('.json')) continue
+      try {
+        const s = JSON.parse(await readFile(join(ROOT, f), 'utf-8')) as SkillShare
+        if (Date.now() - new Date(s.createdAt).getTime() > SHARE_TTL_MS) await unlink(join(ROOT, f)).catch(() => {})
+      } catch { /* skip */ }
+    }
+  } catch { /* ignore */ }
   const share: SkillShare = {
     token: 'ss_' + randomBytes(8).toString('hex'),
     skillId, createdBy, createdByName,
@@ -56,7 +68,8 @@ export async function recordRedeem(token: string, user: string, name?: string): 
   if (!share) return null
   const already = share.redeemedBy.some(r => r.user === user)
   if (!already) {
-    share.redeemedBy.push({ user, name, at: new Date().toISOString() })
+    // 上限 2000：仍授權採用，只是不再記名單（防爆檔 + PDPO 不過度蒐集）
+    if (share.redeemedBy.length < 2000) share.redeemedBy.push({ user, name, at: new Date().toISOString() })
     await save(share)
   }
   return { share, firstTime: !already }

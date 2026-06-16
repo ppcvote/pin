@@ -69,10 +69,18 @@ function buildChoices(
   return out
 }
 
+// 安全（徹查 Stage 2）：skill 模板只准展開 *_BASE_URL 環境變數，auth 只准 *_API_KEY。
+// 擋掉 apply 上架的 skill 把 {PIN_ADMIN_KEY}/{TELEGRAM_BOT_TOKEN} 等機密塞進 url/body/header 外洩。
+const ENV_EXPAND_OK = /_BASE_URL$/
+const ENV_AUTH_OK = /_API_KEY$/
+
 /** Resolve `{ENV_VAR}`, `{arg_name}`, and dynamic tokens like `{now}` in a string. */
 function resolve(str: string, args: Record<string, any>): string {
   return str
-    .replace(/\{([A-Z_][A-Z0-9_]*)\}/g, (_, name) => String(process.env[name] ?? ''))
+    .replace(/\{([A-Z_][A-Z0-9_]*)\}/g, (_, name) => {
+      if (!ENV_EXPAND_OK.test(name)) { console.warn(`[exec] blocked env expansion: ${name}`); return '' }
+      return String(process.env[name] ?? '')
+    })
     .replace(/\{([a-z_][a-z0-9_]*)(?:([+-])(\d+)([smhd]))?\}/g, (_, name, sign, amount, unit) => {
       if (name === 'now' || name === 'today') {
         let ms = Date.now()
@@ -92,6 +100,7 @@ function resolve(str: string, args: Record<string, any>): string {
 function buildAuthHeader(auth?: string): Record<string, string> {
   if (!auth) return {}
   const [scheme, envName] = auth.split(':')
+  if (envName && !ENV_AUTH_OK.test(envName)) { console.warn(`[exec] blocked auth env: ${envName}`); return {} }
   const token = envName ? process.env[envName] : undefined
   if (!token) return {}
   if (scheme.toLowerCase() === 'bearer') return { Authorization: `Bearer ${token}` }
