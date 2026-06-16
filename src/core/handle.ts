@@ -4,6 +4,7 @@ import { appendHistory } from '../brain/memory.js'
 import { findAction, findSkill, allSkills, skillVisibleTo, isPlatformOwner } from '../platform/registry.js'
 import { startApply, appsConsole, inApply, applyText, applyCallback } from './applyFlow.js'
 import { rootMenu, skillMenu, parseCallback } from '../platform/menuRenderer.js'
+import { createSkillShare, recordRedeem } from '../platform/skillShareStore.js'
 import { probeAdminAccess } from '../products/udhouse.js'
 import { executeAction } from '../platform/actionExecutor.js'
 import { startWizard, processWizardCallback, processWizardText, processWizardImage, processWizardImages, type WizardOutcome } from '../platform/wizard.js'
@@ -39,6 +40,7 @@ function actionBlockedReply(
   if (user.bindings?.[skill.id]) return null
   if (isPlatformOwner(userKey)) return null
   if (skill.pin?.owner && skill.pin.owner === userKey) return null // 自己上架的 skill（apply 通過）
+  if (user.grantedSkills?.includes(skill.id)) return null // 透過分享連結採用的
   return {
     text: `${skill.pin?.icon ?? '🔒'} 要先連接「${skill.pin?.display_name ?? skill.name}」才能用這個功能。\n從你自己的產品後台綁定，這個動作就只會動到你的資料。`,
     buttons: [
@@ -183,13 +185,15 @@ function chunkButtons(arr: Button[], perRow: number): Button[][] {
 // 統一的「我的名片」中樞（PPC 6/16：agent 分享頁＝名片，一個就好）。
 // 看／分享走 /card/{slug}（那頁顯示卡＋轉傳），編輯走 /edit。是 owner 在 Pin 裡的唯一一張卡。
 const LIFF_ID = '2010405315-c8Tyd2SU'
-function myCardReply(us: { slug: string; editToken: string; name?: string }, edit = false): OutboundReply {
+function myCardReply(us: { slug: string; editToken: string; name?: string }, edit = false, share?: { sharesCreated: number; adoptions: number }): OutboundReply {
   // 分享直接開 LINE 裡的卡頁（LIFF）→ 一進去就是「轉傳給好友」，省掉「瀏覽器→再按一次」那步。
   const shareUrl = `https://liff.line.me/${LIFF_ID}/card/${us.slug}`
   const cardUrl = `https://ultralab.tw/card/${us.slug}`
   const editUrl = `https://ultralab.tw/edit/${us.slug}?t=${us.editToken}`
+  const battle = share && (share.sharesCreated > 0 || share.adoptions > 0)
+    ? `\n\n🏆 推薦戰績：分享 ${share.sharesCreated} · 被採用 ${share.adoptions}` : ''
   return {
-    text: `🪪 ${us.name ? us.name + ' 的名片卡' : '你的名片卡'}\n\n別人來找你，我第一時間轉給你。轉傳給朋友、看一下、或改一下 👇`,
+    text: `🪪 ${us.name ? us.name + ' 的名片卡' : '你的名片卡'}\n\n別人來找你，我第一時間轉給你。轉傳給朋友、看一下、或改一下 👇${battle}`,
     buttons: [
       [{ text: '🔗 分享到 LINE（轉傳給朋友）', url: shareUrl }],
       [{ text: '👁 看名片卡', url: cardUrl }],
@@ -280,7 +284,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
 
     if (parsed.kind === 'root') {
       const boundIds = Object.keys(user.bindings ?? {})
-      const { title, buttons } = rootMenu(boundIds, adminGrants, userKey)
+      const { title, buttons } = rootMenu(boundIds, adminGrants, userKey, user.grantedSkills ?? [])
       return { text: title, buttons, edit: true, theme: { title: 'Pin' } }
     }
     if (data === 'explore') {
@@ -318,13 +322,37 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       if (!view) return { text: 'Skill not found', edit: true }
       const skill = findSkill(parsed.skillId)
       const isBound = !!user.bindings?.[parsed.skillId]
-      const buttons = withUnbindButton(view.buttons, parsed.skillId, isBound)
+      const base = withUnbindButton(view.buttons, parsed.skillId, isBound)
+      // 自己上架的私人 skill → 加「分享這個工具」（產一鍵採用連結）。平台產品 skill 無 owner，不給。
+      const canShare = !!skill?.pin?.owner && (skill.pin.owner === userKey || isPlatformOwner(userKey))
+      const buttons = canShare
+        ? [...base.slice(0, -1), [{ text: '🔗 分享這個工具', callback_data: `share:${parsed.skillId}` }], ...base.slice(-1)]
+        : base
       const theme: ThemeHint = {
         primaryColor: skill?.pin?.primary_color,
         icon: skill?.pin?.icon,
         title: skill?.name,
       }
       return { text: view.title, buttons, edit: true, theme }
+    }
+
+    // 分享這個工具 — 產生一鍵採用連結（只限自己上架的私人 skill）。
+    if (data.startsWith('share:')) {
+      const skillId = data.slice('share:'.length)
+      const skill = findSkill(skillId)
+      if (!skill?.pin?.owner) return { text: '這個工具不能分享。' }
+      if (skill.pin.owner !== userKey && !isPlatformOwner(userKey)) return { text: '只有擁有者能分享這個工具。' }
+      const share = await createSkillShare(skillId, userKey, msg.userDisplayName)
+      const u = await ensureUser(userKey, msg.userDisplayName, msg.userHandle)
+      u.shareStats = { sharesCreated: (u.shareStats?.sharesCreated ?? 0) + 1, adoptions: u.shareStats?.adoptions ?? 0 }
+      await saveUser(u)
+      const lineLink = `https://line.me/R/oaMessage/%40158mrpzk/?${encodeURIComponent('領取 ' + share.token)}`
+      const tgLink = `https://t.me/UltraPinaibot?start=${share.token}`
+      return {
+        text: `🔗 分享「${skill.pin.display_name ?? skill.name}」\n\n把連結傳給朋友 —— 他一點就直接加進自己的 Pin（沒裝 Pin 也會自動帶他進來）。對方採用了，我會記進你的 Agent 戰績 🏆\n\n📱 LINE 朋友：\n${lineLink}\n\n✈️ Telegram 朋友：\n${tgLink}`,
+        buttons: [[{ text: '⬅️ 返回', callback_data: `s:${skillId}` }]],
+        theme: { primaryColor: skill.pin?.primary_color, icon: skill.pin?.icon, title: skill.name },
+      }
     }
 
     // System-injected: agent-mode mutation confirmation
@@ -402,7 +430,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     // System-injected: agent card ＝ 名片（PPC：一個就好）。有名片＝顯示名片中樞；沒有＝agent 卡 + 做一張。
     if (data === 'card') {
       if (user.ultrasite?.slug && user.ultrasite.editToken) {
-        return myCardReply(user.ultrasite, true)
+        return myCardReply(user.ultrasite, true, user.shareStats)
       }
       const cardData = await buildAgentCardData(userKey)
       const text = renderAgentCardText(cardData)
@@ -627,6 +655,36 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     }
   }
 
+  // Skill 一鍵採用 — ss_{token}（TG /start ss_ 或 LINE 預填「領取 ss_」）。沒 Pin 的人這就是第一次相遇。
+  const ssMatch = text.match(/(?:^|[\s/])(ss_[a-f0-9]{12,40})\b/i)
+  if (ssMatch) {
+    const token = ssMatch[1].toLowerCase()
+    const rec = await recordRedeem(token, userKey, msg.userDisplayName)
+    if (!rec) return { text: '這個分享連結無效或已失效。' }
+    const skill = findSkill(rec.share.skillId)
+    if (!skill || !skill.pin?.owner) return { text: '這個工具已經下架了。' }
+    // 授權＝加進 grantedSkills（可見＋可用）
+    const u = await ensureUser(userKey, msg.userDisplayName, msg.userHandle)
+    u.grantedSkills = Array.from(new Set([...(u.grantedSkills ?? []), skill.id]))
+    await saveUser(u)
+    // 採用 → 給分享者記一筆戰績（去重；自己採用自己不算）
+    if (rec.firstTime && rec.share.createdBy !== userKey) {
+      try {
+        const sharer = await loadUser(rec.share.createdBy)
+        if (sharer) {
+          sharer.shareStats = { sharesCreated: sharer.shareStats?.sharesCreated ?? 0, adoptions: (sharer.shareStats?.adoptions ?? 0) + 1 }
+          await saveUser(sharer)
+        }
+      } catch { /* best-effort */ }
+    }
+    const view = skillMenu(skill.id)
+    return {
+      text: `🎁 ${rec.share.createdByName || '朋友'} 分享了「${skill.pin.display_name ?? skill.name}」給你，已經幫你加好了，試試 👇`,
+      buttons: view?.buttons,
+      theme: { primaryColor: skill.pin?.primary_color, icon: skill.pin?.icon, title: skill.name },
+    }
+  }
+
   // 域名升級 — /start domain：開 GENESIS 域名 skill（查 / 比價 / 註冊）。
   if (/^\/start\s+domain\s*$/i.test(text)) {
     const skill = findSkill('domain')
@@ -755,7 +813,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
   }
   if (text === '/menu') {
     const boundIds = Object.keys(user.bindings ?? {})
-    const { title, buttons } = rootMenu(boundIds, adminGrants, userKey)
+    const { title, buttons } = rootMenu(boundIds, adminGrants, userKey, user.grantedSkills ?? [])
     return { text: title, buttons }
   }
   if (text === '/card') {
@@ -834,7 +892,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
 
   // ULTRASITE「我的名片 / 看名片」—— 顯示名片中樞（看/分享 + 編輯，agent 卡＝名片，一個就好）。
   if (/^(我的|看|查看|顯示|秀).{0,2}(名片|卡片|agent|代理)$|^(名片|我的卡|我的agent)$/i.test(text.trim())) {
-    if (user.ultrasite?.slug && user.ultrasite.editToken) return myCardReply(user.ultrasite)
+    if (user.ultrasite?.slug && user.ultrasite.editToken) return myCardReply(user.ultrasite, false, user.shareStats)
     return {
       text: '你還沒有名片卡。做一張，就能在這看、改、分享 👇',
       buttons: [[{ text: '＋ 做一張我的名片', url: 'https://ultralab.tw/me' }]],
@@ -973,7 +1031,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     }
     // fallback — show menu
     const boundIds = Object.keys(user.bindings ?? {})
-    const root = rootMenu(boundIds, [], userKey)
+    const root = rootMenu(boundIds, adminGrants, userKey, user.grantedSkills ?? [])
     await incrementAgentStat(userKey, 'fallback')
     return { text: `(我這邊路由曖昧, 給你選單 — ${decision.reason})`, buttons: root.buttons }
   }

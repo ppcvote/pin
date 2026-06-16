@@ -3,7 +3,16 @@ import type { Skill } from './types.js'
 
 export interface InlineButton {
   text: string
-  callback_data: string
+  callback_data?: string
+  url?: string                       // 外部連結（單一入口 skill 從首頁直接開）
+}
+
+/** 單一入口的 skill（一個 action、一個 follow_up url）→ 回那個 url，讓首頁按鈕直接開、不用點進選單。 */
+function skillRootUrl(s: Skill): string | null {
+  const acts = s.pin?.actions ?? []
+  if (acts.length !== 1) return null
+  const urls = acts[0].respond?.follow_up_urls ?? []
+  return urls.length === 1 && urls[0]?.url ? urls[0].url : null
 }
 
 /** Top-level menu — agent card up top + bound skills + 🧭 探索 (un-bound).
@@ -13,17 +22,19 @@ export function rootMenu(
   boundSkillIds: string[] = [],
   adminGrantedSkillIds: string[] = [],
   viewerKey?: string,
+  grantedSkillIds: string[] = [],
 ): { title: string; buttons: InlineButton[][] } {
   const skills = allSkills()
   const bound = new Set(boundSkillIds)
   const adminGranted = new Set(adminGrantedSkillIds)
+  const granted = new Set(grantedSkillIds) // 透過分享連結採用的私人 skill
   // Admin-gated skills are always filtered, regardless of binding state.
   // hide_from_root skills never list at root (reached via a hub, e.g. admin-hub).
-  // Owner-private skills (apply flow) only show to their owner / platform owner.
+  // Owner-private skills (apply flow) only show to their owner / platform owner / 被分享授權者.
   const visibleSkills = skills.filter(s =>
     !s.pin?.hide_from_root
     && (!s.pin?.requires_admin || adminGranted.has(s.id))
-    && skillVisibleTo(s, viewerKey))
+    && (skillVisibleTo(s, viewerKey) || granted.has(s.id)))
 
   const buttons: InlineButton[][] = []
   buttons.push([{ text: '🃏 看我的 Agent', callback_data: 'card' }])
@@ -35,12 +46,17 @@ export function rootMenu(
   const atRoot = (s: Skill) =>
     isOwner
     || bound.has(s.id)
+    || granted.has(s.id)
     || (!!s.pin?.requires_admin && adminGranted.has(s.id))
     || (!!s.pin?.owner && !!viewerKey && s.pin.owner === viewerKey)
   const myskills = visibleSkills.filter(atRoot)
   for (const s of myskills) {
     const icon = s.pin?.icon ?? '•'
-    buttons.push([{ text: `${icon} ${s.pin?.display_name ?? s.name}`, callback_data: `s:${s.id}` }])
+    const label = `${icon} ${s.pin?.display_name ?? s.name}`
+    // 擁有者保留選單入口（才能管理/分享）；其他人（採用者/平台 owner）單一入口直接開。
+    const isSkillOwner = !!s.pin?.owner && !!viewerKey && s.pin.owner === viewerKey
+    const direct = isSkillOwner ? null : skillRootUrl(s)
+    buttons.push([direct ? { text: label, url: direct } : { text: label, callback_data: `s:${s.id}` }])
   }
 
   // 🧭 探索 — 列出還沒連接的 skill（去連接，不是直接操作）。

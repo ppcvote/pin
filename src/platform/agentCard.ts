@@ -12,12 +12,14 @@
 import { allSkills } from './registry.js'
 import { activeProtections } from './protections.js'
 import { getCurrentWeekStats, userActiveWithinDays } from '../runtime/stats.js'
+import { loadUser } from '../storage/jsonStore.js'
 
 export interface AgentCardData {
   agentName: string
   weapons: Array<{ icon: string; name: string; status: '活躍' | '待命' }>
   protections: Array<{ label: string; detail?: string }>
   stats: { actions: number; pushes: number; llmFallbacks: number; piiRedactions?: number }
+  share?: { sharesCreated: number; adoptions: number }  // 推薦戰績（累計）
 }
 
 export async function buildAgentCardData(userKey: string, agentName = 'ULTRA AGENT'): Promise<AgentCardData> {
@@ -30,7 +32,8 @@ export async function buildAgentCardData(userKey: string, agentName = 'ULTRA AGE
   }))
   const protections = activeProtections().map(p => ({ label: p.label, detail: p.detail }))
   const stats = await getCurrentWeekStats(userKey)
-  return { agentName, weapons, protections, stats }
+  const u = await loadUser(userKey)
+  return { agentName, weapons, protections, stats, share: u?.shareStats }
 }
 
 export function renderAgentCardText(data: AgentCardData): string {
@@ -61,6 +64,11 @@ export function renderAgentCardText(data: AgentCardData): string {
   lines.push(`  LLM 介入 ×${data.stats.llmFallbacks} ← 越低越強`)
   if ((data.stats.piiRedactions ?? 0) > 0) {
     lines.push(`  PII 攔截 ×${data.stats.piiRedactions}`)
+  }
+  if (data.share && (data.share.sharesCreated > 0 || data.share.adoptions > 0)) {
+    lines.push('')
+    lines.push('🏆 推薦戰績 (累計)')
+    lines.push(`  分享 ×${data.share.sharesCreated} · 被採用 ×${data.share.adoptions}`)
   }
   lines.push('')
   lines.push('⚡ 零幻覺執行 · Powered by Pin')

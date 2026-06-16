@@ -7,3 +7,6 @@ cloudflared.exe
 test-card.png
 assets/fonts/NotoSansTC-VF.ttf
 share-card-test.png
+
+# 內部規格文件（本機工作檔，不進公開 repo）
+PIN_*.md
