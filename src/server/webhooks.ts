@@ -10,6 +10,7 @@ import { createBindToken } from '../storage/bindTokens.js'
 import { shortenCallback } from '../runtime/callbackRefs.js'
 import { findSkill } from '../platform/registry.js'
 import { readByName } from '../runtime/tempStore.js'
+import { adminStats, adminListUsers, adminGetUser, adminDeleteUser } from './adminApi.js'
 import type { Channel, Button } from '../channels/types.js'
 import type { LineChannel } from '../channels/line.js'
 import type { WhatsAppChannel } from '../channels/whatsapp.js'
@@ -139,6 +140,50 @@ export function startWebhookServer(channels: Channel[], port: number = PORT): ht
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: true }))
       return
+    }
+
+    // ── Pin admin API（治理 Phase 2）—— 金鑰保護，給 ultralab /admin 後台。 ──
+    const adminPath = (req.url ?? '').split('?')[0]
+    if (adminPath.startsWith('/admin/')) {
+      const key = req.headers['x-admin-key']
+      const expected = process.env.PIN_ADMIN_KEY
+      if (!expected || typeof key !== 'string' || key !== expected) {
+        console.warn(`[admin] auth fail ${req.method} ${adminPath}`)
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'unauthorized' }))
+        return
+      }
+      const sp = new URL(req.url ?? '', 'http://x').searchParams
+      try {
+        if (req.method === 'GET' && adminPath === '/admin/stats') {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(await adminStats())); return
+        }
+        if (req.method === 'GET' && adminPath === '/admin/users') {
+          const out = await adminListUsers(sp.get('q'), Number(sp.get('limit') ?? 50), Number(sp.get('offset') ?? 0))
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(out)); return
+        }
+        const userMatch = adminPath.match(/^\/admin\/user\/([^/]+)$/)
+        if (req.method === 'GET' && userMatch) {
+          const u = await adminGetUser(decodeURIComponent(userMatch[1]))
+          res.writeHead(u ? 200 : 404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(u ?? { error: 'not_found' })); return
+        }
+        const delMatch = adminPath.match(/^\/admin\/user\/([^/]+)\/delete$/)
+        if (req.method === 'POST' && delMatch) {
+          const r = await adminDeleteUser(decodeURIComponent(delMatch[1]))
+          console.log(`[admin] DELETE user=${decodeURIComponent(delMatch[1])} ok=${r.ok}`)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(r)); return
+        }
+        res.writeHead(404, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'admin_route_not_found' })); return
+      } catch (e) {
+        console.error('[admin] error', e)
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'admin_error' })); return
+      }
     }
 
     // Public scratch-blob endpoint — serves files written by tempStore.saveTempBlob.
