@@ -36,15 +36,38 @@ export async function resolveAccount(channelKey: string): Promise<string> {
   return link?.account || channelKey
 }
 
-/** 把 channelKey 掛到 account（之後 resolveAccount(channelKey) === account）。 */
+/** 把 channelKey 掛到 account（之後 resolveAccount(channelKey) === account）。存 channel 供反查。 */
 export async function linkChannel(channelKey: string, account: string): Promise<void> {
-  await writeJson(join(LINKS, `${safe(channelKey)}.json`), { account, linkedAt: new Date().toISOString() })
+  await writeJson(join(LINKS, `${safe(channelKey)}.json`), { channel: channelKey, account, linkedAt: new Date().toISOString() })
 }
 
 /** 撤銷連結：channelKey 回到自己的帳號（resolveAccount(channelKey) === channelKey）。 */
 export async function unlinkChannel(channelKey: string): Promise<void> {
   const file = join(LINKS, `${safe(channelKey)}.json`)
   try { const { unlink } = await import('node:fs/promises'); await unlink(file) } catch { /* 不存在就算了 */ }
+}
+
+/** 找出所有連到某 account 的 channel（資料刪除/管理用）。 */
+export async function channelsForAccount(account: string): Promise<string[]> {
+  const { readdir } = await import('node:fs/promises')
+  const out: string[] = []
+  try {
+    for (const f of await readdir(LINKS)) {
+      if (!f.endsWith('.json')) continue
+      const link = await readJson<{ channel?: string; account: string }>(join(LINKS, f))
+      if (link?.account === account && link.channel) out.push(link.channel)
+    }
+  } catch { /* 目錄不存在 */ }
+  return out
+}
+
+/** 徹底清掉某 account 的連結資料：連結檔 + Pin 碼（用戶記錄本體由 jsonStore.deleteUser 刪）。 */
+export async function deleteAccountData(account: string, pinCode?: string): Promise<void> {
+  const { unlink } = await import('node:fs/promises')
+  for (const ch of await channelsForAccount(account)) {
+    try { await unlink(join(LINKS, `${safe(ch)}.json`)) } catch { /* ignore */ }
+  }
+  if (pinCode) { try { await unlink(join(CODES, `${safe(pinCode)}.json`)) } catch { /* ignore */ } }
 }
 
 /** 產生一次性連結 token（給「另一台」點了自動掛上 account）。 */

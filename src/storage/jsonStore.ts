@@ -190,7 +190,15 @@ export async function* iterAllUsers(): AsyncGenerator<UserRecord> {
   const files = await readdir(DATA_ROOT)
   for (const f of files) {
     if (!f.endsWith('.json')) continue
-    const raw = await readFile(join(DATA_ROOT, f), 'utf-8')
-    yield JSON.parse(raw) as UserRecord
+    try {
+      const raw = await readFile(join(DATA_ROOT, f), 'utf-8')
+      yield JSON.parse(raw) as UserRecord
+    } catch { /* skip corrupt/partial */ }
   }
+}
+
+/** 刪除一個用戶記錄（資料刪除/合規）。連結檔 + Pin 碼由 accountStore.deleteAccountData 清。 */
+export async function deleteUser(chatId: string): Promise<void> {
+  const file = userFile(chatId)
+  try { const { unlink } = await import('node:fs/promises'); await unlink(file) } catch { /* 不存在 */ }
 }

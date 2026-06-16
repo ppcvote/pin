@@ -1,11 +1,12 @@
-import { ensureUser, loadUser } from '../storage/jsonStore.js'
+import { ensureUser, loadUser, deleteUser, iterAllUsers } from '../storage/jsonStore.js'
+import { listApplications } from '../platform/applicationStore.js'
 import { route as legacyRoute } from '../router.js'
 import { appendHistory } from '../brain/memory.js'
 import { findAction, findSkill, allSkills, skillVisibleTo, isPlatformOwner } from '../platform/registry.js'
 import { startApply, appsConsole, inApply, applyText, applyCallback } from './applyFlow.js'
 import { rootMenu, skillMenu, parseCallback } from '../platform/menuRenderer.js'
 import { createSkillShare, recordRedeem } from '../platform/skillShareStore.js'
-import { resolveAccount, linkChannel, unlinkChannel, createLinkToken, resolveLinkToken, ensurePinCode } from '../platform/accountStore.js'
+import { resolveAccount, linkChannel, unlinkChannel, createLinkToken, resolveLinkToken, ensurePinCode, deleteAccountData, accountForPinCode } from '../platform/accountStore.js'
 import { pushToUser } from '../runtime/notifier.js'
 import { probeAdminAccess } from '../products/udhouse.js'
 import { executeAction } from '../platform/actionExecutor.js'
@@ -399,6 +400,26 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
         buttons: [[{ text: '⬅️ 返回', callback_data: `s:${skillId}` }]],
         theme: { primaryColor: skill.pin?.primary_color, icon: skill.pin?.icon, title: skill.name },
       }
+    }
+
+    // 資料刪除 — 會員自己確認刪（合規）。
+    if (data === 'selfdelete:confirm') {
+      const acct = userKey // canonical
+      const u = await loadUser(acct)
+      await deleteAccountData(acct, u?.pinCode)
+      await deleteUser(acct)
+      return { text: '🗑 已刪除你在 Pin 的所有資料。謝謝你用過 Pin 🙏', edit: true }
+    }
+    // 資料刪除 — owner 刪某會員（確認後）。
+    if (data.startsWith('owndelete:')) {
+      if (!isPlatformOwner(userKey)) return { text: '只有 owner 能做這個。' }
+      const code = data.slice('owndelete:'.length)
+      const acct = await accountForPinCode(code)
+      if (!acct) return { text: '找不到該帳號（可能已刪）。', edit: true }
+      const u = await loadUser(acct)
+      await deleteAccountData(acct, u?.pinCode || code)
+      await deleteUser(acct)
+      return { text: `🗑 已刪除（Pin 碼 ${code}）的所有資料。`, edit: true, buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
     }
 
     // 帳號連結 — 撤銷某台的連結（「新平台登入」提醒裡的撤銷鈕；只有目標帳號本人收得到此鈕）。
@@ -923,6 +944,55 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     return {
       text: `🔗 在「另一個通訊軟體」叫出同一個 Pin\n\n在那個平台開對應連結，就自動連（10 分鐘內有效）：\n📱 LINE：${lineLink}\n✈️ Telegram：${tgLink}\n\n你的 Pin 碼：${code}（識別用，可印名片）`,
       buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]],
+    }
+  }
+  // 資料刪除（PDPO／PIPL 合規）—— 會員自己刪。確認制。
+  if (text === '/deleteme' || /^(刪除|刪掉|清除|移除|刪).{0,3}(我的)?(資料|帳號|帳戶|個資|個人資料)$/.test(text.trim())) {
+    return {
+      text: `⚠️ 刪除你在 Pin 的資料\n\n會永久刪除：綁定、採用的工具、設定、紀錄、跨平台連結。**無法復原。**\n（名片頁如有，請另外處理。）\n\n確定刪？`,
+      buttons: [[{ text: '🗑 確定刪除我的所有資料', callback_data: 'selfdelete:confirm' }], [{ text: '取消', callback_data: 'm:root' }]],
+    }
+  }
+  // Owner 控制台（湧進前治理）—— 只有 platform owner。
+  if (text === '/owner' || /^(owner|控制台|管理台|pin.?admin)$/i.test(text.trim())) {
+    if (!isPlatformOwner(userKey)) return { text: '我看不懂這個指令 — 試 /menu 或自然語言' }
+    let total = 0, todayNew = 0, withBindings = 0, withCard = 0, linkedSharers = 0
+    const today = new Date().toISOString().slice(0, 10)
+    for await (const u of iterAllUsers()) {
+      total++
+      if ((u.onboardedAt || '').slice(0, 10) === today) todayNew++
+      if (u.bindings && Object.keys(u.bindings).length) withBindings++
+      if (u.ultrasite) withCard++
+      if (u.shareStats && (u.shareStats.sharesCreated || u.shareStats.adoptions)) linkedSharers++
+    }
+    const pending = (await listApplications('pending')).length
+    return {
+      text: [
+        '🛠 Pin Owner 控制台',
+        '━━━━━━━━━━━━━━━',
+        `👥 用戶記錄 ${total}（今日新增 ${todayNew}）`,
+        `🔗 有綁定產品 ${withBindings}`,
+        `🪪 有名片 ${withCard}`,
+        `📣 有分享戰績 ${linkedSharers}`,
+        `📋 待審 apply ${pending}`,
+        '',
+        '刪某會員：/deluser <Pin碼>',
+      ].join('\n'),
+      buttons: [[{ text: '📋 待審清單', callback_data: 'ap:list:' }], [{ text: '🏠 主選單', callback_data: 'm:root' }]],
+    }
+  }
+  // Owner 刪某會員（用 Pin 碼）—— 確認制。
+  {
+    const delMatch = text.match(/^\/deluser\s+([a-z0-9]{4,12})\s*$/i)
+    if (delMatch) {
+      if (!isPlatformOwner(userKey)) return { text: '我看不懂這個指令 — 試 /menu 或自然語言' }
+      const acct = await accountForPinCode(delMatch[1].toLowerCase())
+      if (!acct) return { text: '找不到這個 Pin 碼的帳號。' }
+      const target = await loadUser(acct)
+      return {
+        text: `⚠️ 確定刪除這個會員的所有 Pin 資料？\nPin 碼：${delMatch[1]}\n內容：${target ? accountSummary(target) : '（空）'}\n**無法復原。**`,
+        buttons: [[{ text: '🗑 確定刪除', callback_data: `owndelete:${delMatch[1].toLowerCase()}` }], [{ text: '取消', callback_data: 'm:root' }]],
+      }
     }
   }
   if (text === '/card') {
