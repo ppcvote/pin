@@ -158,7 +158,11 @@ export function startWebhookServer(channels: Channel[], port: number = PORT): ht
       }
       if (req.method === 'POST') {
         let xml = ''
-        for await (const chunk of req) xml += chunk
+        for await (const chunk of req) {
+          xml += chunk
+          // WeChat 訊息 XML 一定很小；擋超大 body 記憶體耗盡（其餘路由都有這道，wechat 補上）
+          if (xml.length > 65536) { res.writeHead(413, { 'Content-Type': 'text/plain' }); res.end('too large'); return }
+        }
         const reply = await wx.handleWebhook(xml, { signature, timestamp, nonce })
         // WeChat 把回傳 'success'（或空）當作「已收、不回覆」；有 XML 就是被動回覆。
         res.writeHead(200, { 'Content-Type': reply ? 'application/xml' : 'text/plain' })

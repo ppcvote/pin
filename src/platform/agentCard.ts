@@ -40,7 +40,7 @@ export function renderAgentCardText(data: AgentCardData): string {
   const lines: string[] = []
   lines.push(`🃏 ${data.agentName} — Pin`)
   lines.push('━━━━━━━━━━━━━━━━━')
-  lines.push('⚔️ 武器欄 (skills)')
+  lines.push('⚔️ 武器欄')
   if (data.weapons.length === 0) {
     lines.push('  (尚未載入任何 skill)')
   } else {
@@ -49,7 +49,7 @@ export function renderAgentCardText(data: AgentCardData): string {
     }
   }
   lines.push('')
-  lines.push('🛡️ 防具欄 (protections)')
+  lines.push('🛡️ 防具欄')
   if (data.protections.length === 0) {
     lines.push('  (沒有啟用的防護機制)')
   } else {

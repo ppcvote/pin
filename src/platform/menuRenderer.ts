@@ -62,7 +62,7 @@ export function rootMenu(
   // 🧭 探索 — 列出還沒連接的 skill（去連接，不是直接操作）。
   const explore = visibleSkills.filter(s => !atRoot(s))
   if (explore.length > 0) {
-    buttons.push([{ text: '🧭 探索 (還沒連接)', callback_data: 'explore' }])
+    buttons.push([{ text: '🧭 更多功能', callback_data: 'explore' }])
   }
 
   return { title: '選一個吧 👇', buttons }
@@ -83,8 +83,8 @@ export function skillMenu(skillId: string): { title: string; buttons: InlineButt
         '',
         skill.description.split('\n')[0].slice(0, 200),
         '',
-        '這是標準 Agent Skill(沒有宣告 metadata.pin 選單),所以這裡沒有按鈕可按。',
-        '直接打字描述你想做的事,我會盡力路由;要長出完整選單,請 skill 作者補上 metadata.pin。',
+        '這個功能還在準備中，暫時沒有按鈕。',
+        '直接打字告訴我你想做什麼，我盡量幫你。',
       ].join('\n'),
       buttons: [[{ text: '⬅️ 返回', callback_data: 'm:root' }]],
     }
@@ -105,7 +105,7 @@ export function skillMenu(skillId: string): { title: string; buttons: InlineButt
   }
   // System-injected: binding code (only if the skill exposes webhooks)
   if (hasWebhooks) {
-    buttons.push([{ text: '🔔 綁定通知', callback_data: `bind:${skill.id}` }])
+    buttons.push([{ text: '🔔 連接通知', callback_data: `bind:${skill.id}` }])
   }
   buttons.push([{ text: '⬅️ 返回', callback_data: 'm:root' }])
   const icon = skill.pin.icon ?? ''

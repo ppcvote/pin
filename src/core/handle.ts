@@ -96,56 +96,48 @@ function welcomeScreen(displayName: string, adminGrants: string[] = [], viewerKe
   const skills = allSkills().filter(s => !s.pin?.hide_from_root && (!s.pin?.requires_admin || adminGranted.has(s.id)) && skillVisibleTo(s, viewerKey))
   const skillNames = skills.map(s => `${s.pin?.icon ?? '•'} ${s.name}`).join('  ')
   const text = [
-    `👋 Hi ${displayName}, 我是 **Pin**`,
+    `👋 嗨 ${displayName}，我是 **Pin**`,
     '',
-    'Ultra Lab 全產品的 AI 入口 — 一個介面操控所有工具',
+    '我幫你用按鈕把事情辦完 —— 你只要點，不用打字。',
     '',
-    `現有 skill (${skills.length} 個):`,
+    `你可以做的（${skills.length} 個）：`,
     skillNames,
     '',
-    '點下面任一個直接試 ↓',
+    '點下面任一個試試看 ↓',
   ].join('\n')
 
   const buttons: Button[][] = []
   for (const s of skills) {
     buttons.push([{ text: `${s.pin?.icon ?? '•'} ${s.name}`, callback_data: `s:${s.id}` }])
   }
-  buttons.push([{ text: '📖 完整指令說明', callback_data: 'sys:help' }])
+  buttons.push([{ text: '📖 我能幫你什麼', callback_data: 'sys:help' }])
 
   return { text, buttons, parseMode: 'markdown' }
 }
 
-function helpScreen(): OutboundReply {
-  const agentOn = process.env.PIN_AGENT_MODE === 'true' || process.env.PIN_AGENT_MODE === '1'
+function helpScreen(isOwner = false): OutboundReply {
+  // 一般人看到的：白話、可以直接做的事。開發者那套（指令清單／規格／GitHub）只給 owner。
+  const lines = [
+    '我能幫你的：',
+    '',
+    '• 做一張你的名片 —— 到 ultralab.tw/me，幾個問題就好',
+    '• 收到別人從名片來找你的訊息',
+    '• 用你裝好的工具（點主選單就看得到）',
+    '',
+    '不用記指令，點選單按鈕就行。想做什麼也可以直接跟我說一聲。',
+  ]
+  if (isOwner) {
+    lines.push(
+      '',
+      '— — — — —',
+      '🧩 開發者（只有你看得到）',
+      '  /menu /start /apply /card /stats /version',
+      `  Agent Mode：${process.env.PIN_AGENT_MODE === 'true' || process.env.PIN_AGENT_MODE === '1' ? 'ON' : 'off'}`,
+      '  SKILL.md 標準：agentskills.io · github.com/ppcvote/pin',
+    )
+  }
   return {
-    text: [
-      '📖 Pin 指令一覽',
-      '',
-      '🔘 主操作:',
-      '  /menu     開所有 skill 選單',
-      '  /start    歡迎畫面',
-      '  /apply    把你的網頁變成 Pin 選單（送審後上線）',
-      '  /card     看我的 Agent 卡 (含分享圖)',
-      '  /stats    本週 dogfood 數字 + Agent 決策分布',
-      '  /version  Pin runtime 版本資訊',
-      '  /help     這頁',
-      '',
-      `🤖 Agent Mode: ${agentOn ? 'ON ✅ 你可以直接打自然語言' : 'OFF · 走規則路由'}`,
-      '  例 (when ON):',
-      '    「看一下我的物件」     → 直接執行',
-      '    「這個月成效如何」     → 直接執行',
-      '    「幫我發文」          → 問你發到哪個帳號',
-      '',
-      '🔗 綁定 (產品端 deep link):',
-      '  從產品後台點「📱 用 LINE 管理」→ 一鍵連接',
-      '  詳見 ultralab.tw/pin (即將上線)',
-      '',
-      '🧩 開發者:',
-      '  Pin 跑在 SKILL.md 標準 (Anthropic Agent Skills)',
-      '  任何產品寫 SKILL.md 就接入 LINE/TG/MCP',
-      '  Spec: https://agentskills.io/specification',
-      '  Pin: https://github.com/ppcvote/pin',
-    ].join('\n'),
+    text: lines.join('\n'),
     buttons: [[{ text: '🏠 回主選單', callback_data: 'm:root' }]],
   }
 }
@@ -360,7 +352,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     const data = msg.callback
 
     // System callbacks
-    if (data === 'sys:help') return { ...helpScreen(), edit: true }
+    if (data === 'sys:help') return { ...helpScreen(isPlatformOwner(userKey)), edit: true }
 
     // Self-serve apply (applicant apply:* + owner ap:*) — handled before the
     // generic callback parser so its prefixes never collide with skill routing.
@@ -385,7 +377,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
         .filter(s => skillVisibleTo(s, userKey))
         .filter(s => !boundIds.has(s.id))
       if (unbound.length === 0) {
-        return { text: '所有 skill 都已連接 🎉', buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
+        return { text: '所有功能都連好了 🎉', buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
       }
       const buttons: Button[][] = []
       for (const s of unbound) {
@@ -401,14 +393,14 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       buttons.push([{ text: '🏠 主選單', callback_data: 'm:root' }])
       const lines = unbound.map(s => `${s.pin?.icon ?? '•'} ${s.name} — ${(s.description ?? '').split('\n')[0].slice(0, 60)}`)
       return {
-        text: `🧭 探索\n\n你還沒連接這些 skills:\n\n${lines.join('\n')}\n\n從產品後台點「📱 用 LINE 管理」就能一鍵連接。`,
+        text: `🧭 探索\n\n你還沒連接這些工具：\n\n${lines.join('\n')}\n\n在你用的那個產品裡點「用 LINE 管理」，就能一鍵連起來。`,
         buttons,
         edit: true,
       }
     }
     if (parsed.kind === 'skill') {
       const view = skillMenu(parsed.skillId)
-      if (!view) return { text: 'Skill not found', edit: true }
+      if (!view) return { text: '這個功能不在了，回主選單看看 👇', edit: true }
       const skill = findSkill(parsed.skillId)
       const isBound = !!user.bindings?.[parsed.skillId]
       const base = withUnbindButton(view.buttons, parsed.skillId, isBound)
@@ -519,7 +511,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       if (!found) {
         user.agent_pending = undefined
         await saveUser(user)
-        return { text: 'Action 已不存在' }
+        return { text: '這個操作不在了，回主選單再點一次 👇' }
       }
       const { skill, action } = found
       // P1 TOCTOU：確認與執行間若已解綁，這裡再擋一次（pending.args 可能帶舊租戶）。
@@ -547,7 +539,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     if (data.startsWith('unbind:')) {
       const skillId = data.slice('unbind:'.length)
       const skill = findSkill(skillId)
-      if (!skill) return { text: 'Skill not found' }
+      if (!skill) return { text: '這個功能不在了，回主選單看看 👇' }
       if (!user.bindings?.[skillId]) {
         return { text: '此 skill 目前沒有綁定' }
       }
@@ -564,7 +556,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     if (data.startsWith('unbind_confirm:')) {
       const skillId = data.slice('unbind_confirm:'.length)
       const skill = findSkill(skillId)
-      if (!skill) return { text: 'Skill not found' }
+      if (!skill) return { text: '這個功能不在了，回主選單看看 👇' }
       const u = await ensureUser(userKey, msg.userDisplayName, msg.userHandle)
       if (u.bindings && skillId in u.bindings) {
         delete u.bindings[skillId]
@@ -609,7 +601,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
         const filename = ref.slice(4)  // strip "tmp:"
         const baseUrl = process.env.PIN_PUBLIC_URL ?? ''
         if (!baseUrl) {
-          return { text: '⚠️ 分享圖需要 PIN_PUBLIC_URL 設定 (公網 URL). 請聯絡管理員。' }
+          return { text: '⚠️ 分享圖功能還沒設定好，我去處理一下，等等再試。' }
         }
         const imageUrl = `${baseUrl.replace(/\/$/, '')}/image/${filename}`
         const caption = `我的 agent 本週零幻覺完成 ${cardData.stats.actions} 次操作 ⚡ pin`
@@ -703,7 +695,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     }
     if (parsed.kind === 'action') {
       const found = findAction(parsed.skillId, parsed.actionId)
-      if (!found) return { text: 'Action not found' }
+      if (!found) return { text: '這個操作不在了，回主選單再點一次 👇' }
       const { skill, action } = found
 
       // 授權閘（6/16）：產品 skill 動作用共用金鑰，沒綁定就執行＝踩到平台/別人資料。
@@ -764,7 +756,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       }
       return { text, buttons: keyboard, theme }
     }
-    return { text: 'unknown button' }
+    return { text: '這個按鈕可能過期了，回主選單再點一次 👇', buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
   }
 
   // ── Text input ────────────────────────────────────────────────────────
@@ -802,7 +794,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       }
       return { text: '🔒 這個連結已失效或已被認領。回名片頁重新點「把 Pin 留下」就好。' }
     } catch {
-      return { text: '網絡有點不順，等一下再點一次。' }
+      return { text: '網路有點不順，等一下再點一次。' }
     }
   }
 
@@ -1103,7 +1095,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     return appsConsole()
   }
   if (text === '/help') {
-    return helpScreen()
+    return helpScreen(isPlatformOwner(userKey))
   }
   if (text.startsWith('/')) {
     return { text: '我看不懂這個指令 — 試 /menu 或自然語言' }
@@ -1152,7 +1144,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       console.warn(`[shield blocked] user=${userKey} threats=${decision.threats.map(t => t.type).join(',')}`)
       await incrementAgentStat(userKey, 'blocked')
       return {
-        text: `🛡️ Pin 偵測到這段話可能在繞 agent 邊界 (${decision.threats[0]?.type ?? decision.reason})\n\n從選單操作完全不受影響 👇`,
+        text: `🛡️ 這句我先不照做，怕誤會你的意思 🙏\n\n直接從下面的選單點，最穩 👇`,
         buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]],
       }
     }
@@ -1192,7 +1184,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
           .map(([k, v]) => `   • ${k}: ${String(v).slice(0, 100)}`)
           .join('\n')
         return {
-          text: `🤖 我打算執行: ${skill.pin?.icon ?? ''} ${action.label}\n\n參數:\n${argLines || '   (無)'}\n\n⚠️ 這個動作會寫入資料, 先確定再動?\n\n🧠×1`,
+          text: `🤖 我打算執行: ${skill.pin?.icon ?? ''} ${action.label}\n\n參數:\n${argLines || '   (無)'}\n\n⚠️ 這個動作會寫入資料, 先確定再動?`,
           buttons: [[
             { text: '✅ 確定執行', callback_data: `agent_confirm:${pendingId}` },
             { text: '❌ 取消', callback_data: 'm:root' },
@@ -1211,7 +1203,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
           await saveUser(user)
         }
         const reply = wizardOutcomeToReply(outcome, skill)
-        return { ...reply, text: `${reply.text}\n\n🧠×1` }
+        return { ...reply, text: `${reply.text}` }
       }
       const result = await executeAction(skill, action, decision.args ?? {})
       await incrementStat(userKey, 'actions')
@@ -1226,7 +1218,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
         : `${action.label} 失敗: ${result.error}`
       const theme: ThemeHint = { primaryColor: skill.pin?.primary_color, icon: skill.pin?.icon, title: skill.name }
       await appendHistory(userKey, 'assistant', replyText, msg.userDisplayName, msg.userHandle)
-      return { text: `${replyText}\n\n🧠×1`, theme,
+      return { text: `${replyText}`, theme,
                buttons: [[{ text: `⬅️ ${skill.name}`, callback_data: `s:${skill.id}` }, { text: '🏠 主選單', callback_data: 'm:root' }]] }
     }
     if (decision.kind === 'clarify') {
@@ -1244,21 +1236,21 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       // PIN_PERSONA §8 — scan LLM clarification text for redline violations
       const _clarifyScan = scanRedline(decision.question)
       if (!_clarifyScan.passed) reportRedlineViolation(`agent:clarify user=${userKey}`, _clarifyScan.hits)
-      return { text: `${decision.question}\n\n🧠×1`, buttons: candidateButtons }
+      return { text: `${decision.question}`, buttons: candidateButtons }
     }
     if (decision.kind === 'none') {
       await appendHistory(userKey, 'assistant', decision.reply, msg.userDisplayName, msg.userHandle)
       // PIN_PERSONA §8 — scan LLM none-reply text for redline violations
       const _noneScan = scanRedline(decision.reply)
       if (!_noneScan.passed) reportRedlineViolation(`agent:none user=${userKey}`, _noneScan.hits)
-      return { text: `${decision.reply}\n\n或從選單操作 👇  🧠×1`,
+      return { text: `${decision.reply}\n\n或從選單操作 👇`,
                buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
     }
     // fallback — show menu
     const boundIds = Object.keys(user.bindings ?? {})
     const root = rootMenu(boundIds, adminGrants, userKey, user.grantedSkills ?? [])
     await incrementAgentStat(userKey, 'fallback')
-    return { text: `(我這邊路由曖昧, 給你選單 — ${decision.reason})`, buttons: root.buttons }
+    return { text: '我一下沒聽懂，幫你開選單，直接點 👇', buttons: root.buttons }
   }
 
   // Legacy free-form path (regex first, optional LLM fallback) — used when
