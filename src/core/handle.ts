@@ -181,13 +181,17 @@ function chunkButtons(arr: Button[], perRow: number): Button[][] {
 
 // 統一的「我的名片」中樞（PPC 6/16：agent 分享頁＝名片，一個就好）。
 // 看／分享走 /card/{slug}（那頁顯示卡＋轉傳），編輯走 /edit。是 owner 在 Pin 裡的唯一一張卡。
+const LIFF_ID = '2010405315-c8Tyd2SU'
 function myCardReply(us: { slug: string; editToken: string; name?: string }, edit = false): OutboundReply {
+  // 分享直接開 LINE 裡的卡頁（LIFF）→ 一進去就是「轉傳給好友」，省掉「瀏覽器→再按一次」那步。
+  const shareUrl = `https://liff.line.me/${LIFF_ID}/card/${us.slug}`
   const cardUrl = `https://ultralab.tw/card/${us.slug}`
   const editUrl = `https://ultralab.tw/edit/${us.slug}?t=${us.editToken}`
   return {
-    text: `🪪 ${us.name ? us.name + ' 的名片卡' : '你的名片卡'}\n\n別人來找你，我第一時間轉給你。看一下、改一下、或轉傳給朋友 👇`,
+    text: `🪪 ${us.name ? us.name + ' 的名片卡' : '你的名片卡'}\n\n別人來找你，我第一時間轉給你。轉傳給朋友、看一下、或改一下 👇`,
     buttons: [
-      [{ text: '🔗 看 / 分享名片卡', url: cardUrl }],
+      [{ text: '🔗 分享到 LINE（轉傳給朋友）', url: shareUrl }],
+      [{ text: '👁 看名片卡', url: cardUrl }],
       [{ text: '✏️ 編輯名片', url: editUrl }],
       [{ text: '🏠 主選單', callback_data: 'm:root' }],
     ],

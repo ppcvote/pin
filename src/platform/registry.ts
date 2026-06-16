@@ -31,12 +31,13 @@ export function findSkill(id: string): Skill | undefined {
 /** The platform owner (sole approver) is identified by OWNER_CHAT_ID. Tolerates
  *  both the composite "<channel>:<id>" form and a bare channel-native id. */
 export function isPlatformOwner(viewerKey: string | undefined): boolean {
-  const owner = process.env.OWNER_CHAT_ID
-  if (!owner || !viewerKey) return false
-  if (viewerKey === owner) return true
+  const ownerEnv = process.env.OWNER_CHAT_ID
+  if (!ownerEnv || !viewerKey) return false
+  // OWNER_CHAT_ID 可逗號分隔多個 id（同一主人跨 channel：TG id + LINE id…）。
+  const owners = ownerEnv.split(',').map(s => s.trim()).filter(Boolean)
   const idx = viewerKey.indexOf(':')
   const nativeId = idx >= 0 ? viewerKey.slice(idx + 1) : viewerKey
-  return nativeId === owner
+  return owners.some(o => viewerKey === o || nativeId === o)
 }
 
 /** Owner-private skills (apply flow) are visible only to their owner and the
