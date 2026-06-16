@@ -5,7 +5,8 @@ import { findAction, findSkill, allSkills, skillVisibleTo, isPlatformOwner } fro
 import { startApply, appsConsole, inApply, applyText, applyCallback } from './applyFlow.js'
 import { rootMenu, skillMenu, parseCallback } from '../platform/menuRenderer.js'
 import { createSkillShare, recordRedeem } from '../platform/skillShareStore.js'
-import { resolveAccount, linkChannel, createLinkToken, resolveLinkToken, ensurePinCode } from '../platform/accountStore.js'
+import { resolveAccount, linkChannel, unlinkChannel, createLinkToken, resolveLinkToken, ensurePinCode } from '../platform/accountStore.js'
+import { pushToUser } from '../runtime/notifier.js'
 import { probeAdminAccess } from '../products/udhouse.js'
 import { executeAction } from '../platform/actionExecutor.js'
 import { startWizard, processWizardCallback, processWizardText, processWizardImage, processWizardImages, type WizardOutcome } from '../platform/wizard.js'
@@ -225,6 +226,18 @@ function accountSummary(u: UR): string {
   if (u.notes?.length) parts.push(`${u.notes.length} 筆記事`)
   return parts.join('、') || '一些設定'
 }
+function platformName(channelId: string): string {
+  const m: Record<string, string> = { tg: 'Telegram', telegram: 'Telegram', line: 'LINE', wa: 'WhatsApp', whatsapp: 'WhatsApp', wechat: '微信' }
+  return m[channelId] || channelId
+}
+/** 連結成功 → 通知該帳號原本的（canonical）平台，當作「新平台登入」提醒。best-effort。 */
+async function notifyLinked(account: string, newRawKey: string, newPlatformId: string): Promise<void> {
+  try {
+    await pushToUser(account,
+      `🔗 你的 Pin 剛剛在「${platformName(newPlatformId)}」連上了。\n不是你本人的話，點下面撤銷。`,
+      [[{ text: '🚫 撤銷這個連結', callback_data: `linkrevoke:${newRawKey}` }]])
+  } catch { /* best-effort */ }
+}
 function mergeInto(dest: UR, src: UR): void {
   dest.bindings = { ...(src.bindings ?? {}), ...(dest.bindings ?? {}) } // 衝突時 dest（目標 Pin）優先
   dest.grantedSkills = Array.from(new Set([...(dest.grantedSkills ?? []), ...(src.grantedSkills ?? [])]))
@@ -388,6 +401,17 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       }
     }
 
+    // 帳號連結 — 撤銷某台的連結（「新平台登入」提醒裡的撤銷鈕；只有目標帳號本人收得到此鈕）。
+    if (data.startsWith('linkrevoke:')) {
+      const revokeKey = data.slice('linkrevoke:'.length)
+      // 安全：只能撤「連到我這個帳號」的 channel
+      if ((await resolveAccount(revokeKey)) !== userKey) {
+        return { text: '這個連結不屬於你的 Pin，無法撤銷。' }
+      }
+      await unlinkChannel(revokeKey)
+      return { text: `🚫 已撤銷 —— 「${platformName(revokeKey.split(':')[0])}」那台已斷開、回到獨立帳號。`, buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]], edit: true }
+    }
+
     // 帳號連結 — 確認把這台的資料併進目標 Pin。
     if (data.startsWith('linkmerge:')) {
       const token = data.slice('linkmerge:'.length)
@@ -397,6 +421,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       const dest = await loadUser(target)
       if (own && dest) { mergeInto(dest, own); await saveUser(dest) }
       await linkChannel(rawKey, target)
+      await notifyLinked(target, rawKey, msg.channelId)
       return { text: '🔗 併好了！兩邊合成同一個 Pin，全通。', buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]], edit: true }
     }
 
@@ -742,6 +767,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     const own = await loadUser(rawKey)
     if (!own || isThinAccount(own)) {
       await linkChannel(rawKey, target)
+      await notifyLinked(target, rawKey, msg.channelId)
       return { text: '🔗 連結好了！你在這個平台就是同一個 Pin 了 —— 名片、綁定、設定、戰績全通。', buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
     }
     // 有實質資料 → 不自動併，問清楚（PPC 拍板）

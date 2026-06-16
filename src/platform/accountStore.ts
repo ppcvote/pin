@@ -41,6 +41,12 @@ export async function linkChannel(channelKey: string, account: string): Promise<
   await writeJson(join(LINKS, `${safe(channelKey)}.json`), { account, linkedAt: new Date().toISOString() })
 }
 
+/** 撤銷連結：channelKey 回到自己的帳號（resolveAccount(channelKey) === channelKey）。 */
+export async function unlinkChannel(channelKey: string): Promise<void> {
+  const file = join(LINKS, `${safe(channelKey)}.json`)
+  try { const { unlink } = await import('node:fs/promises'); await unlink(file) } catch { /* 不存在就算了 */ }
+}
+
 /** 產生一次性連結 token（給「另一台」點了自動掛上 account）。 */
 export async function createLinkToken(account: string): Promise<string> {
   const token = 'link_' + randomBytes(8).toString('hex')
