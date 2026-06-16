@@ -928,7 +928,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
         text: [
           `✅ 已連接 ${icon} ${skill.name}`,
           ``,
-          `📊 你的 AVS 病歷對比 (來自 UltraGrowth 服務介入前 → 現在):`,
+          `📊 你的網站體質分數 (AVS) 前後對照 (我們開始服務前 → 現在):`,
           ``,
           `  服務前  ${before}/100`,
           `  現在    ${after}/100   ${arrow} ${Math.abs(delta)} 分`,
@@ -996,7 +996,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     const lineLink = `https://line.me/R/oaMessage/%40158mrpzk/?${encodeURIComponent('連結 ' + token)}`
     const tgLink = `https://t.me/UltraPinaibot?start=${token}`
     return {
-      text: `🔗 在「另一個通訊軟體」叫出同一個 Pin\n\n在那個平台開對應連結，就自動連（10 分鐘內有效）：\n📱 LINE：${lineLink}\n✈️ Telegram：${tgLink}\n\n你的 Pin 碼：${code}（識別用，可印名片）`,
+      text: `🔗 在「另一個通訊軟體」叫出同一個 Pin\n\n在那個平台開對應連結，就自動連（10 分鐘內有效）：\n📱 LINE：${lineLink}\n✈️ Telegram：${tgLink}\n\n你的 Pin 編號：${code}（像會員編號，要連另一支手機時用得到，也可以印在名片上）`,
       buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]],
     }
   }
