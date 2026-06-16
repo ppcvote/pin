@@ -1043,6 +1043,13 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     }
   }
   if (text === '/version') {
+    // 非 owner 只給最小資訊（別把 skill 清單／agent mode／repo 這些攻擊面地圖洩漏給任何陌生人）。
+    if (!isPlatformOwner(userKey)) {
+      return {
+        text: 'Pin runtime — LINE / Telegram',
+        buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]],
+      }
+    }
     const skills = allSkills()
     const totalActions = skills.reduce((n, s) => n + (s.pin?.actions?.length ?? 0), 0)
     const totalWebhooks = skills.reduce((n, s) => n + (s.pin?.webhooks?.length ?? 0), 0)

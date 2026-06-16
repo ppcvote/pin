@@ -11,6 +11,7 @@ import { shortenCallback } from '../runtime/callbackRefs.js'
 import { findSkill } from '../platform/registry.js'
 import { readByName } from '../runtime/tempStore.js'
 import { adminStats, adminListUsers, adminGetUser, adminDeleteUser } from './adminApi.js'
+import { pushToUser } from '../runtime/notifier.js'
 import type { Channel, Button } from '../channels/types.js'
 import type { LineChannel } from '../channels/line.js'
 import type { WhatsAppChannel } from '../channels/whatsapp.js'
@@ -140,6 +141,34 @@ export function startWebhookServer(channels: Channel[], port: number = PORT): ht
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: true }))
       return
+    }
+
+    // ── Lead 通知中繼：UltraLab 名片頁諮詢 → 推給卡主本人，LINE/TG/WhatsApp 一致 ──
+    // （UltraLab 沒有 LINE token；之前只有 telegram 卡主收得到，LINE 卡主靜默漏接。）金鑰保護。
+    if (req.method === 'POST' && (req.url ?? '').split('?')[0] === '/lead-notify') {
+      let leadBody = ''
+      for await (const chunk of req) leadBody += chunk
+      let p: any = {}
+      try { p = JSON.parse(leadBody || '{}') } catch { /* ignore */ }
+      const expected = process.env.PIN_CLAIM_SECRET
+      const okSecret = !!expected && typeof p.secret === 'string' && p.secret.length === expected.length
+        && crypto.timingSafeEqual(Buffer.from(p.secret), Buffer.from(expected))
+      if (!okSecret) {
+        res.writeHead(403, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'forbidden' })); return
+      }
+      const chId = p.ownerType === 'telegram' ? 'tg' : p.ownerType === 'whatsapp' ? 'wa' : String(p.ownerType || '')
+      const userKey = chId && p.ownerId ? `${chId}:${p.ownerId}` : ''
+      if (!userKey) {
+        res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'bad_owner' })); return
+      }
+      const fromName = String(p.fromName || '').slice(0, 40) || '(未填名)'
+      const contact = String(p.contact || '').slice(0, 80) || '(未填)'
+      const message = String(p.message || '').slice(0, 500) || '(無)'
+      const slug = String(p.slug || '').slice(0, 32).replace(/[^a-z0-9]/gi, '')
+      const text = `🔔 有人在你的名片頁留訊息 👇\n來自：${fromName}\n聯絡：${contact}\n訊息：${message}`
+      const buttons: Button[][] = slug ? [[{ text: '開頁面', url: `https://ultralab.tw/p/${slug}` }]] : []
+      const ok = await pushToUser(userKey, text, buttons)
+      res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok })); return
     }
 
     // ── Pin admin API（治理 Phase 2）—— 金鑰保護，給 ultralab /admin 後台。 ──
