@@ -12,7 +12,7 @@ interface GenerateResponse {
 }
 
 /** Call Ollama generate endpoint. Uses node:http directly (no TLS). */
-export async function generate(prompt: string, opts?: { temperature?: number; max?: number }): Promise<string> {
+export async function generate(prompt: string, opts?: { temperature?: number; max?: number; json?: boolean }): Promise<string> {
   const body = JSON.stringify({
     model: MODEL,
     prompt,

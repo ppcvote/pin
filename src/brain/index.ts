@@ -5,7 +5,7 @@ const MODE = (process.env.BRAIN_MODE ?? 'ollama').toLowerCase()
 
 export const brainName = MODE
 
-export async function generate(prompt: string, opts?: { temperature?: number; max?: number }): Promise<string> {
+export async function generate(prompt: string, opts?: { temperature?: number; max?: number; json?: boolean }): Promise<string> {
   if (MODE === 'gemini') return geminiGenerate(prompt, opts)
   return ollamaGenerate(prompt, opts)
 }

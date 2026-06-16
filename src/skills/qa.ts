@@ -75,6 +75,20 @@ function sourceLabel(url: string): string {
   try { return `📎 ${new URL(url).hostname}` } catch { return '📎 來源' }
 }
 
+/** Belt-and-suspenders: if the model still returns a JSON object (e.g.
+ *  {"answer": "..."}), pull the prose out instead of showing raw JSON. */
+export function unwrapAnswer(text: string): string {
+  const t = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim()
+  if (t.startsWith('{') || t.startsWith('[')) {
+    try {
+      const obj = JSON.parse(t)
+      const val = obj.answer ?? obj.text ?? obj.response ?? obj.reply ?? obj.content
+      if (typeof val === 'string' && val.trim()) return val.trim()
+    } catch { /* truncated/!JSON — fall through to raw */ }
+  }
+  return t
+}
+
 export async function ask(args: Record<string, any>, knowledgeDir?: string): Promise<QaResult> {
   const question = String(args.question ?? '').trim()
   if (!question) return { ok: false, error: '請輸入問題' }
@@ -120,10 +134,13 @@ ${question}`
 
   let answer: string
   try {
-    answer = await generate(prompt, { temperature: 0.3, max: 400 })
+    // json:false → plain prose. (The shared brain defaults to JSON mode for the
+    // agent/legacy routers, which would otherwise wrap this as {"answer": "..."}.)
+    answer = await generate(prompt, { temperature: 0.3, max: 400, json: false })
   } catch (err) {
     return { ok: false, error: `brain 暫時無法回應: ${(err as Error).message.slice(0, 80)}` }
   }
+  answer = unwrapAnswer(answer)
 
   const followUps = hits
     .filter(h => h.source)

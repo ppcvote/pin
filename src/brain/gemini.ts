@@ -14,14 +14,17 @@ interface GeminiResponse {
  * Call Gemini generateContent.
  * Strips ```json``` code fences from output (Gemini frequently wraps JSON in them).
  */
-export async function generate(prompt: string, opts?: { temperature?: number; max?: number }): Promise<string> {
+export async function generate(prompt: string, opts?: { temperature?: number; max?: number; json?: boolean }): Promise<string> {
   if (!KEY) throw new Error('GEMINI_API_KEY not set')
   const body = JSON.stringify({
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
       temperature: opts?.temperature ?? 0.2,
       maxOutputTokens: opts?.max ?? 512,
-      responseMimeType: 'application/json',
+      // JSON by default (legacy + agent routers parse JSON). Prose callers
+      // (e.g. the qa skill) pass json:false to get plain text — otherwise
+      // Gemini wraps the answer as {"answer": "..."} and the user sees raw JSON.
+      responseMimeType: opts?.json === false ? 'text/plain' : 'application/json',
       // No responseSchema — different callers emit different shapes (legacy
       // router uses {intent, rewritten, reply}; agent router uses
       // {decision, action, args, candidates, question, reply}). Pinning a

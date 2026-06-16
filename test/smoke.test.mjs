@@ -1375,3 +1375,12 @@ test('admin fold: welcome screen hides hide_from_root skills from admins (folded
   assert.ok(cbs.includes('s:admin-hub'), 'admin sees the 管理後台 hub on welcome')
   assert.ok(!cbs.includes('s:udhouse-admin'), 'folded udhouse-admin must NOT float on the welcome screen')
 })
+
+test('qa: unwrapAnswer rescues JSON-wrapped model output, leaves prose intact', async () => {
+  const { unwrapAnswer } = await import('../dist/skills/qa.js')
+  assert.equal(unwrapAnswer('{"answer": "Pin 是執行環境"}'), 'Pin 是執行環境')
+  assert.equal(unwrapAnswer('```json\n{"answer":"hi"}\n```'), 'hi')
+  assert.equal(unwrapAnswer('就是一段純文字答案'), '就是一段純文字答案')
+  // Truncated/invalid JSON → return as-is rather than throwing.
+  assert.equal(unwrapAnswer('{"answer": "被截斷'), '{"answer": "被截斷')
+})
