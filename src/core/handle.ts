@@ -884,7 +884,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     const hourBucket = new Date().toISOString().slice(0, 13)  // "2026-06-12T01"
     if (u.bind_attempts && u.bind_attempts.hourBucket === hourBucket && u.bind_attempts.count >= 10) {
       console.warn(`[bind redeem] rate-limited user=${userKey}`)
-      return null  // silent ignore
+      return { text: '⌛ 連接嘗試太多次了，請過一小時再試。' } // 不再靜默（用戶會以為壞掉）
     }
     u.bind_attempts = { hourBucket,
       count: (u.bind_attempts?.hourBucket === hourBucket ? u.bind_attempts.count : 0) + 1 }
