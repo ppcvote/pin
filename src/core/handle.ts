@@ -260,6 +260,35 @@ function mergeInto(dest: UR, src: UR): void {
   dest.expenses = [...(dest.expenses ?? []), ...(src.expenses ?? [])]
 }
 
+// Owner 控制台（湧進前治理）。/owner 指令 + 管理後台(admin-hub)裡的按鈕 + ownerconsole callback 共用。
+async function ownerConsole(edit = false): Promise<OutboundReply> {
+  let total = 0, todayNew = 0, withBindings = 0, withCard = 0, linkedSharers = 0
+  const today = new Date().toISOString().slice(0, 10)
+  for await (const u of iterAllUsers()) {
+    total++
+    if ((u.onboardedAt || '').slice(0, 10) === today) todayNew++
+    if (u.bindings && Object.keys(u.bindings).length) withBindings++
+    if (u.ultrasite) withCard++
+    if (u.shareStats && (u.shareStats.sharesCreated || u.shareStats.adoptions)) linkedSharers++
+  }
+  const pending = (await listApplications('pending')).length
+  return {
+    text: [
+      '🛠 Pin Owner 控制台',
+      '━━━━━━━━━━━━━━━',
+      `👥 用戶記錄 ${total}（今日新增 ${todayNew}）`,
+      `🔗 有綁定產品 ${withBindings}`,
+      `🪪 有名片 ${withCard}`,
+      `📣 有分享戰績 ${linkedSharers}`,
+      `📋 待審 apply ${pending}`,
+      '',
+      '刪某會員：/deluser <Pin碼>　·　全會員管理：ultralab.tw/admin → Pin 會員',
+    ].join('\n'),
+    buttons: [[{ text: '📋 待審清單', callback_data: 'ap:list:' }], [{ text: '🏠 主選單', callback_data: 'm:root' }]],
+    edit,
+  }
+}
+
 export async function handlePinMessage(msg: InboundMessage): Promise<OutboundReply | null> {
   // 這台通訊軟體的原始識別（channel:userId）。
   const rawKey = `${msg.channelId}:${msg.userId}`
@@ -382,9 +411,13 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       const base = withUnbindButton(view.buttons, parsed.skillId, isBound)
       // 自己上架的私人 skill → 加「分享這個工具」（產一鍵採用連結）。平台產品 skill 無 owner，不給。
       const canShare = !!skill?.pin?.owner && (skill.pin.owner === userKey || isPlatformOwner(userKey))
-      const buttons = canShare
+      let buttons = canShare
         ? [...base.slice(0, -1), [{ text: '🔗 分享這個工具', callback_data: `share:${parsed.skillId}` }], ...base.slice(-1)]
         : base
+      // 管理後台(admin-hub) → owner 多一顆「Pin 控制台」（治理數字/刪除入口）。
+      if (parsed.skillId === 'admin-hub' && isPlatformOwner(userKey)) {
+        buttons = [[{ text: '📊 Pin 控制台', callback_data: 'ownerconsole' }], ...buttons]
+      }
       const theme: ThemeHint = {
         primaryColor: skill?.pin?.primary_color,
         icon: skill?.pin?.icon,
@@ -410,6 +443,12 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
         buttons: [[{ text: '⬅️ 返回', callback_data: `s:${skillId}` }]],
         theme: { primaryColor: skill.pin?.primary_color, icon: skill.pin?.icon, title: skill.name },
       }
+    }
+
+    // Owner 控制台（管理後台裡的「📊 Pin 控制台」按鈕）。
+    if (data === 'ownerconsole') {
+      if (!isPlatformOwner(userKey)) return { text: '只有 owner 能看。' }
+      return ownerConsole(true)
     }
 
     // 資料刪除 — 會員自己確認刪（合規）。
@@ -970,30 +1009,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
   // Owner 控制台（湧進前治理）—— 只有 platform owner。
   if (text === '/owner' || /^(owner|控制台|管理台|pin.?admin)$/i.test(text.trim())) {
     if (!isPlatformOwner(userKey)) return { text: '我看不懂這個指令 — 試 /menu 或自然語言' }
-    let total = 0, todayNew = 0, withBindings = 0, withCard = 0, linkedSharers = 0
-    const today = new Date().toISOString().slice(0, 10)
-    for await (const u of iterAllUsers()) {
-      total++
-      if ((u.onboardedAt || '').slice(0, 10) === today) todayNew++
-      if (u.bindings && Object.keys(u.bindings).length) withBindings++
-      if (u.ultrasite) withCard++
-      if (u.shareStats && (u.shareStats.sharesCreated || u.shareStats.adoptions)) linkedSharers++
-    }
-    const pending = (await listApplications('pending')).length
-    return {
-      text: [
-        '🛠 Pin Owner 控制台',
-        '━━━━━━━━━━━━━━━',
-        `👥 用戶記錄 ${total}（今日新增 ${todayNew}）`,
-        `🔗 有綁定產品 ${withBindings}`,
-        `🪪 有名片 ${withCard}`,
-        `📣 有分享戰績 ${linkedSharers}`,
-        `📋 待審 apply ${pending}`,
-        '',
-        '刪某會員：/deluser <Pin碼>',
-      ].join('\n'),
-      buttons: [[{ text: '📋 待審清單', callback_data: 'ap:list:' }], [{ text: '🏠 主選單', callback_data: 'm:root' }]],
-    }
+    return ownerConsole()
   }
   // Owner 刪某會員（用 Pin 碼）—— 確認制。
   {
