@@ -454,6 +454,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       const dest = await loadUser(target)
       if (own && dest) { mergeInto(dest, own); await saveUser(dest) }
       await linkChannel(rawKey, target)
+      if (own) { try { await deleteUser(rawKey) } catch { /* 併入後刪來源、避免重複帳號 */ } }
       await notifyLinked(target, rawKey, msg.channelId)
       return { text: '🔗 併好了！兩邊合成同一個 Pin，全通。', buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]], edit: true }
     }
@@ -800,6 +801,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     const own = await loadUser(rawKey)
     if (!own || isThinAccount(own)) {
       await linkChannel(rawKey, target)
+      if (own) { try { await deleteUser(rawKey) } catch { /* 清掉空來源、避免重複帳號 */ } }
       await notifyLinked(target, rawKey, msg.channelId)
       return { text: '🔗 連結好了！你在這個平台就是同一個 Pin 了 —— 名片、綁定、設定、戰績全通。', buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
     }
