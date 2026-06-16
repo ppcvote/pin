@@ -28,6 +28,26 @@ const NAV_ROW = (skillId?: string): Button[] => skillId
 // 其餘 skill（advisor/mindthread/udhouse/domain/ultragrowth…）動作一律要綁定或 owner。
 const PUBLIC_SKILLS = new Set(['qa', 'slides'])
 
+/** 動作授權閘（6/16）：非 public skill、未綁定、非 owner → 回拒絕訊息；否則 null（放行）。
+ *  callback 與 agent-mode 兩條執行路徑都要過這道（agent-mode 的 LLM 路由會繞過 callback 閘）。 */
+function actionBlockedReply(
+  skill: import('../platform/types.js').Skill,
+  userKey: string,
+  user: import('../storage/jsonStore.js').UserRecord,
+): OutboundReply | null {
+  if (PUBLIC_SKILLS.has(skill.id)) return null
+  if (user.bindings?.[skill.id]) return null
+  if (isPlatformOwner(userKey)) return null
+  return {
+    text: `${skill.pin?.icon ?? '🔒'} 要先連接「${skill.pin?.display_name ?? skill.name}」才能用這個功能。\n從你自己的產品後台綁定，這個動作就只會動到你的資料。`,
+    buttons: [
+      ...((skill.pin?.webhooks?.length ?? 0) > 0 ? [[{ text: '🔔 連接通知', callback_data: `bind:${skill.id}` }]] : []),
+      [{ text: '🏠 主選單', callback_data: 'm:root' }],
+    ],
+    theme: { primaryColor: skill.pin?.primary_color, icon: skill.pin?.icon, title: skill.name },
+  }
+}
+
 /**
  * Probe admin access for any requires_admin skills that haven't been checked yet.
  * Result is persisted to user.admin_probe_cache so subsequent messages are instant.
@@ -503,19 +523,9 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       if (!found) return { text: 'Action not found' }
       const { skill, action } = found
 
-      // 授權修補（6/16）：產品 skill 的動作用「共用金鑰」打後端，沒綁定就執行＝會踩到平台/別人資料。
-      // 除了通用工具(PUBLIC_SKILLS)，一律要先綁定（或本人 owner）才准跑動作。
-      if (!PUBLIC_SKILLS.has(skill.id) && !user.bindings?.[parsed.skillId] && !isPlatformOwner(userKey)) {
-        const icon = skill.pin?.icon ?? '🔒'
-        return {
-          text: `${icon} 要先連接「${skill.pin?.display_name ?? skill.name}」才能用這個功能。\n從你自己的產品後台綁定，這個動作就只會動到你的資料。`,
-          buttons: [
-            ...((skill.pin?.webhooks?.length ?? 0) > 0 ? [[{ text: '🔔 連接通知', callback_data: `bind:${skill.id}` }]] : []),
-            [{ text: '🏠 主選單', callback_data: 'm:root' }],
-          ],
-          theme: { primaryColor: skill.pin?.primary_color, icon: skill.pin?.icon, title: skill.name },
-        }
-      }
+      // 授權閘（6/16）：產品 skill 動作用共用金鑰，沒綁定就執行＝踩到平台/別人資料。
+      const _blockedCb = actionBlockedReply(skill, userKey, user)
+      if (_blockedCb) return _blockedCb
 
       // Args still needed? Pre-filled args (from a choices/follow-up button)
       // count as satisfied. Anything else triggers the wizard.
@@ -869,6 +879,11 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
                  buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
       }
       const { skill, action } = found
+
+      // 授權閘（6/16）：agent-mode 的 LLM 路由不經 callback 閘，必須在這裡也擋一次，
+      // 否則陌生人打自然語言就能繞過綁定、用共用金鑰跑產品動作。
+      const _blockedAgent = actionBlockedReply(skill, userKey, user)
+      if (_blockedAgent) return _blockedAgent
 
       // PIN_AGENT_MODE §4.2 — force preview on agent-triggered mutations.
       const isMutation = ['POST', 'PUT', 'DELETE'].includes(action.api?.method ?? '')
