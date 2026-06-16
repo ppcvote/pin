@@ -205,8 +205,10 @@ test('callback refs: unknown ref resolves to null; handler replies menu-expired'
 test('callback refs: indirect wizard callback still routes into the active wizard', async () => {
   const { shortenCallback } = await import('../dist/runtime/callbackRefs.js')
   const { handlePinMessage } = await import('../dist/core/handle.js')
-  const { loadUser } = await import('../dist/storage/jsonStore.js')
+  const { loadUser, ensureUser, saveUser } = await import('../dist/storage/jsonStore.js')
   const uid = 'TEST_CBREF_WZ_' + Date.now()
+  // Bind to mindthread so the 6/16 authz gate lets the action start its wizard.
+  const _seed = await ensureUser('tg:' + uid, 't'); _seed.bindings = { mindthread: { tenantKey: 'test' } }; await saveUser(_seed)
   // Start the post wizard (account select step)
   await handlePinMessage({ channelId: 'tg', userId: uid, userDisplayName: 't', callback: 'a:mindthread:post' })
   let user = await loadUser('tg:' + uid)
@@ -267,8 +269,10 @@ test('ultragrowth declares report.ready and lead.created webhooks', () => {
 
 test('wizard cancels when user types a slash command (/menu, /card, /stats)', async () => {
   const { handlePinMessage } = await import('../dist/core/handle.js')
-  const { loadUser } = await import('../dist/storage/jsonStore.js')
+  const { loadUser, ensureUser, saveUser } = await import('../dist/storage/jsonStore.js')
   const uid = 'TEST_WIZARD_SLASH_CANCEL_' + Date.now()
+  // Bind to mindthread so the 6/16 authz gate lets the action start its wizard.
+  const _seed = await ensureUser('line:' + uid, 't'); _seed.bindings = { mindthread: { tenantKey: 'test' } }; await saveUser(_seed)
   // Start a wizard
   await handlePinMessage({ channelId: 'line', userId: uid, userDisplayName: 't', callback: 'a:mindthread:post' })
   let user = await loadUser('line:' + uid)
@@ -281,8 +285,9 @@ test('wizard cancels when user types a slash command (/menu, /card, /stats)', as
 
 test('wizard cancels when user taps a non-wizard callback (s:..., m:root)', async () => {
   const { handlePinMessage } = await import('../dist/core/handle.js')
-  const { loadUser } = await import('../dist/storage/jsonStore.js')
+  const { loadUser, ensureUser, saveUser } = await import('../dist/storage/jsonStore.js')
   const uid = 'TEST_WIZARD_CB_CANCEL_' + Date.now()
+  const _seed = await ensureUser('line:' + uid, 't'); _seed.bindings = { mindthread: { tenantKey: 'test' } }; await saveUser(_seed)
   await handlePinMessage({ channelId: 'line', userId: uid, userDisplayName: 't', callback: 'a:mindthread:post' })
   let user = await loadUser('line:' + uid)
   assert.ok(user?.wizard, 'wizard should be active after starting post action')
@@ -293,8 +298,9 @@ test('wizard cancels when user taps a non-wizard callback (s:..., m:root)', asyn
 
 test('wizard cancels via explicit wz:cancel callback', async () => {
   const { handlePinMessage } = await import('../dist/core/handle.js')
-  const { loadUser } = await import('../dist/storage/jsonStore.js')
+  const { loadUser, ensureUser, saveUser } = await import('../dist/storage/jsonStore.js')
   const uid = 'TEST_WIZARD_EXPLICIT_CANCEL_' + Date.now()
+  const _seed = await ensureUser('line:' + uid, 't'); _seed.bindings = { mindthread: { tenantKey: 'test' } }; await saveUser(_seed)
   await handlePinMessage({ channelId: 'line', userId: uid, userDisplayName: 't', callback: 'a:mindthread:post' })
   const reply = await handlePinMessage({ channelId: 'line', userId: uid, userDisplayName: 't', callback: 'wz:cancel' })
   const user = await loadUser('line:' + uid)
@@ -1370,8 +1376,16 @@ test('admin fold: welcome screen hides hide_from_root skills from admins (folded
     'udhouse-admin': { isAdmin: true, checkedAt: new Date().toISOString() },
   }
   await saveUser(u)
-  const r = await handlePinMessage({ channelId: 'tg', userId: uid, userDisplayName: 'Boss', text: '/start' })
-  const cbs = (r?.buttons ?? []).flat().map(b => b.callback_data)
+  // 6/16 authz: admin grants are owner-only now. Make this test user the platform owner.
+  const _origOwner = process.env.OWNER_CHAT_ID
+  process.env.OWNER_CHAT_ID = uid + (_origOwner ? ',' + _origOwner : '')
+  let cbs
+  try {
+    const r = await handlePinMessage({ channelId: 'tg', userId: uid, userDisplayName: 'Boss', text: '/start' })
+    cbs = (r?.buttons ?? []).flat().map(b => b.callback_data)
+  } finally {
+    process.env.OWNER_CHAT_ID = _origOwner
+  }
   assert.ok(cbs.includes('s:admin-hub'), 'admin sees the 管理後台 hub on welcome')
   assert.ok(!cbs.includes('s:udhouse-admin'), 'folded udhouse-admin must NOT float on the welcome screen')
 })
