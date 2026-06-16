@@ -28,15 +28,17 @@ export function rootMenu(
   const buttons: InlineButton[][] = []
   buttons.push([{ text: '🃏 看我的 Agent', callback_data: 'card' }])
 
-  // 只顯示「你綁的」skill —— 不再對未綁定者全顯示（授權修補 6/16：避免陌生人看到/點到產品 skill）。
-  const myskills = visibleSkills.filter(s => bound.has(s.id))
+  // 顯示「你綁的」skill ＋ admin-granted 的管理 hub（owner 才有 admin grant）。
+  // 不再對未綁定者全顯示（授權修補 6/16：避免陌生人看到/點到產品 skill）。
+  const atRoot = (s: Skill) => bound.has(s.id) || (!!s.pin?.requires_admin && adminGranted.has(s.id))
+  const myskills = visibleSkills.filter(atRoot)
   for (const s of myskills) {
     const icon = s.pin?.icon ?? '•'
     buttons.push([{ text: `${icon} ${s.pin?.display_name ?? s.name}`, callback_data: `s:${s.id}` }])
   }
 
   // 🧭 探索 — 列出還沒連接的 skill（去連接，不是直接操作）。
-  const explore = visibleSkills.filter(s => !bound.has(s.id))
+  const explore = visibleSkills.filter(s => !atRoot(s))
   if (explore.length > 0) {
     buttons.push([{ text: '🧭 探索 (還沒連接)', callback_data: 'explore' }])
   }
