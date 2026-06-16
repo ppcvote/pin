@@ -59,7 +59,7 @@ function adminGrantsFromCache(user: import('../storage/jsonStore.js').UserRecord
 /** Render the platform's main onboarding screen. */
 function welcomeScreen(displayName: string, adminGrants: string[] = [], viewerKey?: string): OutboundReply {
   const adminGranted = new Set(adminGrants)
-  const skills = allSkills().filter(s => (!s.pin?.requires_admin || adminGranted.has(s.id)) && skillVisibleTo(s, viewerKey))
+  const skills = allSkills().filter(s => !s.pin?.hide_from_root && (!s.pin?.requires_admin || adminGranted.has(s.id)) && skillVisibleTo(s, viewerKey))
   const skillNames = skills.map(s => `${s.pin?.icon ?? '•'} ${s.name}`).join('  ')
   const text = [
     `👋 Hi ${displayName}, 我是 **Pin**`,
@@ -237,6 +237,7 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       const adminGranted = new Set(adminGrants)
       const boundIds = new Set(Object.keys(user.bindings ?? {}))
       const unbound = allSkills()
+        .filter(s => !s.pin?.hide_from_root)
         .filter(s => !s.pin?.requires_admin || adminGranted.has(s.id))
         .filter(s => skillVisibleTo(s, userKey))
         .filter(s => !boundIds.has(s.id))

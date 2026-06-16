@@ -21,10 +21,14 @@ import { createBindToken, redeemBindToken, peekBindToken } from '../dist/storage
 bootRegistry()
 const skills = allSkills()
 
-test('nine live skills are registered', () => {
-  assert.equal(skills.length, 9)
-  const ids = skills.map(s => s.id).sort()
-  assert.deepEqual(ids, ['admin-hub', 'advisor', 'domain', 'mindthread', 'qa', 'slides', 'udhouse', 'udhouse-admin', 'ultragrowth'])
+test('all built-in skills are registered', () => {
+  // Exact-count assertion retired: approved self-serve user skills (apply flow)
+  // legitimately join the registry from data/user-skills/. Assert the built-ins
+  // are all present instead.
+  const ids = new Set(skills.map(s => s.id))
+  for (const id of ['admin-hub', 'advisor', 'domain', 'mindthread', 'qa', 'slides', 'udhouse', 'udhouse-admin', 'ultragrowth']) {
+    assert.ok(ids.has(id), `built-in skill ${id} must be registered`)
+  }
 })
 
 test('slides skill: make_deck wizard args + generous timeout', () => {
@@ -1352,4 +1356,22 @@ test('easter: easter eggs pass their own redline scanner', () => {
         `Easter egg for ${moment} failed redline: ${scan.hits.join(', ')} | text: "${egg}"`)
     }
   }
+})
+
+test('admin fold: welcome screen hides hide_from_root skills from admins (folded into hub)', async () => {
+  const { handlePinMessage } = await import('../dist/core/handle.js')
+  const { ensureUser, saveUser, loadUser } = await import('../dist/storage/jsonStore.js')
+  const uid = 'TEST_FOLD_' + Date.now()
+  const key = 'tg:' + uid
+  const u = await ensureUser(key, 'Boss')
+  // Pre-seed admin grants so ensureAdminProbeCache does no network probe.
+  u.admin_probe_cache = {
+    'admin-hub': { isAdmin: true, checkedAt: new Date().toISOString() },
+    'udhouse-admin': { isAdmin: true, checkedAt: new Date().toISOString() },
+  }
+  await saveUser(u)
+  const r = await handlePinMessage({ channelId: 'tg', userId: uid, userDisplayName: 'Boss', text: '/start' })
+  const cbs = (r?.buttons ?? []).flat().map(b => b.callback_data)
+  assert.ok(cbs.includes('s:admin-hub'), 'admin sees the 管理後台 hub on welcome')
+  assert.ok(!cbs.includes('s:udhouse-admin'), 'folded udhouse-admin must NOT float on the welcome screen')
 })
