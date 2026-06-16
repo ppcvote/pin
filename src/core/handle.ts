@@ -38,6 +38,7 @@ function actionBlockedReply(
   if (PUBLIC_SKILLS.has(skill.id)) return null
   if (user.bindings?.[skill.id]) return null
   if (isPlatformOwner(userKey)) return null
+  if (skill.pin?.owner && skill.pin.owner === userKey) return null // 自己上架的 skill（apply 通過）
   return {
     text: `${skill.pin?.icon ?? '🔒'} 要先連接「${skill.pin?.display_name ?? skill.name}」才能用這個功能。\n從你自己的產品後台綁定，這個動作就只會動到你的資料。`,
     buttons: [

@@ -31,7 +31,12 @@ export function rootMenu(
   // owner 本人＝全顯示（dogfood 所有產品）；其他人＝只顯示「你綁的」＋ admin-granted hub。
   // 授權修補 6/16：避免陌生人看到/點到產品 skill，但別把 owner 自己也鎖住。
   const isOwner = isPlatformOwner(viewerKey)
-  const atRoot = (s: Skill) => isOwner || bound.has(s.id) || (!!s.pin?.requires_admin && adminGranted.has(s.id))
+  // 在首頁顯示：平台 owner（全部）／你綁的／admin hub／**你自己上架的 skill**（apply 通過的，owner===你）。
+  const atRoot = (s: Skill) =>
+    isOwner
+    || bound.has(s.id)
+    || (!!s.pin?.requires_admin && adminGranted.has(s.id))
+    || (!!s.pin?.owner && !!viewerKey && s.pin.owner === viewerKey)
   const myskills = visibleSkills.filter(atRoot)
   for (const s of myskills) {
     const icon = s.pin?.icon ?? '•'
