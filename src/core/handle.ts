@@ -227,6 +227,16 @@ function accountSummary(u: UR): string {
   if (u.notes?.length) parts.push(`${u.notes.length} 筆記事`)
   return parts.join('、') || '一些設定'
 }
+/** 資料刪除（合規）：連名片頁一起刪 —— 卡存在 UltraLab，用 Pin 存的 editToken 授權刪。best-effort。 */
+async function deleteUltrasiteCard(us?: { slug?: string; editToken?: string }): Promise<void> {
+  if (!us?.slug || !us.editToken) return
+  try {
+    await fetch('https://ultralab.tw/api/probe-scan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'ultrasite-delete', slug: us.slug, editToken: us.editToken }),
+    })
+  } catch { /* best-effort */ }
+}
 function platformName(channelId: string): string {
   const m: Record<string, string> = { tg: 'Telegram', telegram: 'Telegram', line: 'LINE', wa: 'WhatsApp', whatsapp: 'WhatsApp', wechat: '微信' }
   return m[channelId] || channelId
@@ -406,9 +416,10 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     if (data === 'selfdelete:confirm') {
       const acct = userKey // canonical
       const u = await loadUser(acct)
+      await deleteUltrasiteCard(u?.ultrasite)
       await deleteAccountData(acct, u?.pinCode)
       await deleteUser(acct)
-      return { text: '🗑 已刪除你在 Pin 的所有資料。謝謝你用過 Pin 🙏', edit: true }
+      return { text: '🗑 已刪除你在 Pin 的所有資料（含名片頁）。謝謝你用過 Pin 🙏', edit: true }
     }
     // 資料刪除 — owner 刪某會員（確認後）。
     if (data.startsWith('owndelete:')) {
@@ -417,9 +428,10 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       const acct = await accountForPinCode(code)
       if (!acct) return { text: '找不到該帳號（可能已刪）。', edit: true }
       const u = await loadUser(acct)
+      await deleteUltrasiteCard(u?.ultrasite)
       await deleteAccountData(acct, u?.pinCode || code)
       await deleteUser(acct)
-      return { text: `🗑 已刪除（Pin 碼 ${code}）的所有資料。`, edit: true, buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
+      return { text: `🗑 已刪除（Pin 碼 ${code}）的所有資料（含名片頁）。`, edit: true, buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
     }
 
     // 帳號連結 — 撤銷某台的連結（「新平台登入」提醒裡的撤銷鈕；只有目標帳號本人收得到此鈕）。
