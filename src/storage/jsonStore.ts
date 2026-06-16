@@ -66,6 +66,8 @@ export interface UserRecord {
   agentStats?: Record<string, { execute: number; clarify: number; none: number; blocked: number; fallback: number }>
   /** Active product bindings. Keyed by skill name. */
   bindings?: Record<string, { tenantKey: string; boundAt: string }>
+  /** ULTRASITE 名片頁 — 認領時存 slug+editToken，之後「改名片」一鍵開視覺編輯器。 */
+  ultrasite?: { slug: string; editToken: string; name?: string; boundAt: string }
   /** Bind redemption rate limit — counter resets each hour bucket. */
   bind_attempts?: { hourBucket: string; count: number }
   /** ISO timestamp of the last inbound WhatsApp message from this user. Drives the 24-hour window check. */

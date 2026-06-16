@@ -549,7 +549,18 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       })
       const d: any = await r.json().catch(() => ({}))
       if (r.ok && d?.ok) {
-        return { text: `✅ 這頁現在歸你了${d.name ? `（${d.name}）` : ''}。有人在上面留訊息，我第一時間轉給你。` }
+        // 存 slug+editToken → 之後「改名片」一鍵開編輯器（放照片/改字都在這）
+        if (d.editToken) {
+          try {
+            const u = await ensureUser(userKey, msg.userDisplayName, msg.userHandle)
+            u.ultrasite = { slug: d.slug, editToken: d.editToken, name: d.name || '', boundAt: new Date().toISOString() }
+            await saveUser(u)
+          } catch { /* 存失敗不擋認領；改名片時會再退回提示 */ }
+        }
+        return {
+          text: `✅ 這頁現在歸你了${d.name ? `（${d.name}）` : ''}。有人在上面留訊息，我第一時間轉給你。\n\n想改內容、換照片？跟我說「改名片」，或直接點下面 👇`,
+          buttons: d.editToken ? [[{ text: '✏️ 編輯我的名片', url: `https://ultralab.tw/edit/${d.slug}?t=${d.editToken}` }]] : undefined,
+        }
       }
       return { text: '🔒 這個連結已失效或已被認領。回名片頁重新點「把 Pin 留下」就好。' }
     } catch {
@@ -760,6 +771,21 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
   // continues the flow. Slash commands above already escaped it.
   if (inApply(user)) {
     return applyText(user, text)
+  }
+
+  // ULTRASITE「改名片」—— 一鍵開視覺編輯器（放照片/改字/換色，所見即所得）。
+  if (/(改|編輯|換|修改).{0,3}(名片|卡片|網頁|頁面|照片|大頭照)|名片.{0,2}(怎麼|要)?(改|編輯)/.test(text)) {
+    if (user.ultrasite?.slug && user.ultrasite.editToken) {
+      const us = user.ultrasite
+      return {
+        text: `改你的名片頁${us.name ? `（${us.name}）` : ''} —— 點下面開編輯器，名字／頭銜／標語／介紹／顏色／**照片**都能改，改完按「儲存」就即時更新，網址不變。`,
+        buttons: [[{ text: '✏️ 開啟編輯器', url: `https://ultralab.tw/edit/${us.slug}?t=${us.editToken}` }]],
+      }
+    }
+    return {
+      text: '你還沒有用 Pin 做的名片頁喔。要不要先做一個？幾個問題就好，做完就能改、能放照片。',
+      buttons: [[{ text: '做一張我的名片', url: 'https://ultralab.tw/me' }]],
+    }
   }
 
   // Free-form text routing
