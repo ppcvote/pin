@@ -115,14 +115,14 @@ export async function applyCallback(
     await saveApplication(app)
     delete user.apply
     await saveUser(user)
-    // Notify the owner (best-effort). They can also pull with /apps.
-    // OWNER_CHAT_ID may be bare (no channel prefix) — assume the primary TG channel.
-    const owner = process.env.OWNER_CHAT_ID
-    if (owner) {
-      const ownerKey = owner.includes(':') ? owner : `tg:${owner}`
+    // Notify the owner(s) (best-effort). They can also pull with /apps.
+    // OWNER_CHAT_ID 可逗號分隔多 id（同一主人跨 channel）；逐個推、channel 用 id 形態推斷。
+    const ownerEnv = process.env.OWNER_CHAT_ID
+    for (const raw of (ownerEnv ?? '').split(',').map(s => s.trim()).filter(Boolean)) {
+      const ownerKey = raw.includes(':') ? raw : (/^\d+$/.test(raw) ? `tg:${raw}` : `line:${raw}`)
       await pushToUser(ownerKey,
         `🔔 新 Pin 申請\n${app.ownerName}：${app.proposal.display_name}\n${app.origin}`,
-        [[{ text: '👀 審核', callback_data: `ap:view:${app.id}` }]])
+        [[{ text: '👀 審核', callback_data: `ap:view:${app.id}` }]]).catch(() => { /* best-effort per owner */ })
     }
     return {
       text: '✅ 已送出申請！PPC 核准後，你在 /menu 就會看到自己的 Pin。',
