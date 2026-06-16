@@ -534,8 +534,8 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
   const text = (msg.text ?? '').trim()
   if (!text) return null
 
-  // ULTRASITE 名片認領 — /start us_{token}：回打 UltraLab claim，把這頁的諮詢回流綁給我。
-  const usMatch = text.match(/^\/start\s+us_([a-f0-9]{12,32})\s*$/i)
+  // ULTRASITE 名片認領 — TG 走 /start us_{token}；LINE 沒有 /start，用預填訊息帶 us_{token}（夾在中文裡也接）。
+  const usMatch = text.match(/us_([a-f0-9]{12,32})/i)
   if (usMatch) {
     const token = usMatch[1].toLowerCase()
     try {
