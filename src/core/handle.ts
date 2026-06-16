@@ -872,6 +872,10 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
       prevBinding ? `✅ 已重新連接 ${icon} ${skill.name}` : `✅ 已連接 ${icon} ${skill.name}`,
       '',
     ]
+    // 跨產品「認得你」：產品端可在 /bind/token 帶 meta.note（例「認得你了，X！你是 Advisor 會員」）→ 置頂顯示。
+    if (typeof entry.meta?.note === 'string' && entry.meta.note.trim()) {
+      lines.unshift(entry.meta.note.trim(), '')
+    }
     if (prevBinding && prevBinding.tenantKey !== entry.tenantKey) {
       lines.push('已切換到新的帳號連結。', '')
     } else if (prevBinding) {
