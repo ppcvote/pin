@@ -72,6 +72,8 @@ export interface UserRecord {
   grantedSkills?: string[]
   /** 推薦戰績：我建立的分享數 + 別人經我分享而採用的數（顯示在 Agent 卡）。 */
   shareStats?: { sharesCreated: number; adoptions: number }
+  /** 這個 Pin 帳號的 Pin 碼（穩定、可顯示/印名片/跨平台識別）。 */
+  pinCode?: string
   /** Bind redemption rate limit — counter resets each hour bucket. */
   bind_attempts?: { hourBucket: string; count: number }
   /** ISO timestamp of the last inbound WhatsApp message from this user. Drives the 24-hour window check. */

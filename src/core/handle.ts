@@ -5,6 +5,7 @@ import { findAction, findSkill, allSkills, skillVisibleTo, isPlatformOwner } fro
 import { startApply, appsConsole, inApply, applyText, applyCallback } from './applyFlow.js'
 import { rootMenu, skillMenu, parseCallback } from '../platform/menuRenderer.js'
 import { createSkillShare, recordRedeem } from '../platform/skillShareStore.js'
+import { resolveAccount, linkChannel, createLinkToken, resolveLinkToken, ensurePinCode } from '../platform/accountStore.js'
 import { probeAdminAccess } from '../products/udhouse.js'
 import { executeAction } from '../platform/actionExecutor.js'
 import { startWizard, processWizardCallback, processWizardText, processWizardImage, processWizardImages, type WizardOutcome } from '../platform/wizard.js'
@@ -205,10 +206,42 @@ function myCardReply(us: { slug: string; editToken: string; name?: string }, edi
   }
 }
 
+// 帳號連結（B）helpers：判斷「空帳號」、摘要、合併。
+type UR = import('../storage/jsonStore.js').UserRecord
+function isThinAccount(u: UR): boolean {
+  return !(u.bindings && Object.keys(u.bindings).length)
+    && !(u.grantedSkills && u.grantedSkills.length)
+    && !u.ultrasite
+    && !(u.shareStats && (u.shareStats.sharesCreated || u.shareStats.adoptions))
+    && !(u.notes && u.notes.length)
+    && !(u.reminders && u.reminders.length)
+    && !(u.expenses && u.expenses.length)
+}
+function accountSummary(u: UR): string {
+  const parts: string[] = []
+  if (u.bindings && Object.keys(u.bindings).length) parts.push(`${Object.keys(u.bindings).length} 個綁定`)
+  if (u.ultrasite) parts.push('一張名片')
+  if (u.grantedSkills?.length) parts.push(`${u.grantedSkills.length} 個採用的工具`)
+  if (u.notes?.length) parts.push(`${u.notes.length} 筆記事`)
+  return parts.join('、') || '一些設定'
+}
+function mergeInto(dest: UR, src: UR): void {
+  dest.bindings = { ...(src.bindings ?? {}), ...(dest.bindings ?? {}) } // 衝突時 dest（目標 Pin）優先
+  dest.grantedSkills = Array.from(new Set([...(dest.grantedSkills ?? []), ...(src.grantedSkills ?? [])]))
+  if (!dest.ultrasite && src.ultrasite) dest.ultrasite = src.ultrasite
+  const a = dest.shareStats, b = src.shareStats
+  if (a || b) dest.shareStats = { sharesCreated: (a?.sharesCreated ?? 0) + (b?.sharesCreated ?? 0), adoptions: (a?.adoptions ?? 0) + (b?.adoptions ?? 0) }
+  dest.notes = [...(dest.notes ?? []), ...(src.notes ?? [])]
+  dest.reminders = [...(dest.reminders ?? []), ...(src.reminders ?? [])]
+  dest.expenses = [...(dest.expenses ?? []), ...(src.expenses ?? [])]
+}
+
 export async function handlePinMessage(msg: InboundMessage): Promise<OutboundReply | null> {
-  // Composite user key for cross-channel isolation. TG digits, LINE alphanumeric, etc.
-  // Stored as the jsonStore filename directly — channel prefix prevents collisions.
-  const userKey = `${msg.channelId}:${msg.userId}`
+  // 這台通訊軟體的原始識別（channel:userId）。
+  const rawKey = `${msg.channelId}:${msg.userId}`
+  // 一人一 Pin（PPC 6/16）：把 rawKey 解析成 canonical 帳號 key。沒連結 = 原樣（零影響）。
+  // 之後全部用 userKey（canonical）→ 連結過的多平台共用同一個 Pin。
+  const userKey = await resolveAccount(rawKey)
   let user = await ensureUser(userKey, msg.userDisplayName, msg.userHandle)
 
   // Admin gate: probe requires_admin skills once per user; cache result in user record.
@@ -353,6 +386,18 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
         buttons: [[{ text: '⬅️ 返回', callback_data: `s:${skillId}` }]],
         theme: { primaryColor: skill.pin?.primary_color, icon: skill.pin?.icon, title: skill.name },
       }
+    }
+
+    // 帳號連結 — 確認把這台的資料併進目標 Pin。
+    if (data.startsWith('linkmerge:')) {
+      const token = data.slice('linkmerge:'.length)
+      const target = await resolveLinkToken(token)
+      if (!target) return { text: '連結過期了，請在原本那台重新產生連結。' }
+      const own = await loadUser(rawKey)
+      const dest = await loadUser(target)
+      if (own && dest) { mergeInto(dest, own); await saveUser(dest) }
+      await linkChannel(rawKey, target)
+      return { text: '🔗 併好了！兩邊合成同一個 Pin，全通。', buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]], edit: true }
     }
 
     // System-injected: agent-mode mutation confirmation
@@ -685,6 +730,27 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     }
   }
 
+  // 帳號連結 — link_{token}：把「這台通訊軟體」掛到產碼者的 Pin（一人一 Pin，PPC 6/16）。
+  const linkMatch = text.match(/(?:^|[\s/])(link_[a-f0-9]{12,40})\b/i)
+  if (linkMatch) {
+    const token = linkMatch[1].toLowerCase()
+    const target = await resolveLinkToken(token)
+    if (!target) return { text: '這個「連結帳號」的連結無效或過期了（10 分鐘內有效）。請在原本那台重新產生。' }
+    if (rawKey === target || (await resolveAccount(rawKey)) === target) {
+      return { text: '這台已經是同一個 Pin 了 ✓', buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
+    }
+    const own = await loadUser(rawKey)
+    if (!own || isThinAccount(own)) {
+      await linkChannel(rawKey, target)
+      return { text: '🔗 連結好了！你在這個平台就是同一個 Pin 了 —— 名片、綁定、設定、戰績全通。', buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]] }
+    }
+    // 有實質資料 → 不自動併，問清楚（PPC 拍板）
+    return {
+      text: `這台已經有自己的東西了（${accountSummary(own)}）。要把它**併進**你要連結的 Pin 嗎？併了就合成同一個。`,
+      buttons: [[{ text: '✅ 併進來', callback_data: `linkmerge:${token}` }], [{ text: '取消', callback_data: 'm:root' }]],
+    }
+  }
+
   // 域名升級 — /start domain：開 GENESIS 域名 skill（查 / 比價 / 註冊）。
   if (/^\/start\s+domain\s*$/i.test(text)) {
     const skill = findSkill('domain')
@@ -815,6 +881,19 @@ export async function handlePinMessage(msg: InboundMessage): Promise<OutboundRep
     const boundIds = Object.keys(user.bindings ?? {})
     const { title, buttons } = rootMenu(boundIds, adminGrants, userKey, user.grantedSkills ?? [])
     return { text: title, buttons }
+  }
+  // 帳號連結 — 在另一個通訊軟體叫出同一個 Pin（一人一 Pin）。
+  if (text === '/link' || /^(連結帳號|連動帳號|跨平台|另一.*平台|同步.*帳號|連結.*另)/i.test(text.trim())) {
+    user = (await loadUser(userKey)) ?? user
+    const code = await ensurePinCode(userKey, user.pinCode)
+    if (code !== user.pinCode) { user.pinCode = code; await saveUser(user) }
+    const token = await createLinkToken(userKey)
+    const lineLink = `https://line.me/R/oaMessage/%40158mrpzk/?${encodeURIComponent('連結 ' + token)}`
+    const tgLink = `https://t.me/UltraPinaibot?start=${token}`
+    return {
+      text: `🔗 在「另一個通訊軟體」叫出同一個 Pin\n\n在那個平台開對應連結，就自動連（10 分鐘內有效）：\n📱 LINE：${lineLink}\n✈️ Telegram：${tgLink}\n\n你的 Pin 碼：${code}（識別用，可印名片）`,
+      buttons: [[{ text: '🏠 主選單', callback_data: 'm:root' }]],
+    }
   }
   if (text === '/card') {
     const cardData = await buildAgentCardData(userKey)
